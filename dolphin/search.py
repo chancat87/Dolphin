@@ -262,23 +262,21 @@ def attention_beam_search(
     maxlen = encoder_out.size(1)
     encoder_dim = encoder_out.size(2)
     running_size = batch_size * beam_size
-    if model.special_tokens and "<asr>" in model.special_tokens:
-        if infos and "langs" in infos and "dialects" in infos:
-            assert "tokenizer" in infos, "Please specify tokenizer!"
-            tokenizer = infos["tokenizer"]
 
-            langs = infos["langs"]
-            dialects = infos["dialects"]
-            langs = [lang for lang in langs for _ in range(beam_size)]
-            dialects = [dialect for dialect in dialects for _ in range(beam_size)]
-            notimestamp = infos.get("notimestamp", True)
+    if infos and "langs" in infos and "dialects" in infos:
+        assert "tokenizer" in infos, "Please specify tokenizer!"
+        tokenizer = infos["tokenizer"]
 
-            hyps = add_dolphin_tokens(tokenizer, langs, dialects, notimestamp, device) # type: ignore
-        else:
-            hyps = torch.ones([running_size, 1], dtype=torch.long, device=device).fill_(model.sos)  # (B*N, 1)
+        langs = infos["langs"]
+        dialects = infos["dialects"]
+        langs = [lang for lang in langs for _ in range(beam_size)]
+        dialects = [dialect for dialect in dialects for _ in range(beam_size)]
+        notimestamp = infos.get("notimestamp", True)
+
+        hyps = add_dolphin_tokens(tokenizer, langs, dialects, notimestamp, device) # type: ignore
     else:
-        hyps = torch.ones([running_size, 1], dtype=torch.long,
-                          device=device).fill_(model.sos)  # (B*N, 1)
+        hyps = torch.ones([running_size, 1], dtype=torch.long, device=device).fill_(model.sos)  # (B*N, 1)
+
     prefix_len = hyps.size(1)
     scores = torch.tensor([0.0] + [-float('inf')] * (beam_size - 1),
                           dtype=torch.float)
@@ -376,14 +374,14 @@ def attention_rescoring(
     infos: Dict[str, List[str]] = None,
     encoder_mask: torch.Tensor = None,
 ) -> List[DecodeResult]:
-    """
-        Args:
-            ctc_prefix_results(List[DecodeResult]): ctc prefix beam search results
-    """
     sos, eos = model.sos_symbol(), model.eos_symbol()
     device = encoder_outs.device
     assert encoder_outs.shape[0] == len(ctc_prefix_results)
     batch_size = encoder_outs.shape[0]
+
+    assert "tokenizer" in infos, "Please specify tokenizer!"
+    tokenizer: BaseTokenizer = infos["tokenizer"]
+
     results = []
     for b in range(batch_size):
         encoder_out = encoder_outs[b, :encoder_lens[b], :].unsqueeze(0)
@@ -399,8 +397,6 @@ def attention_rescoring(
         if infos and "langs" in infos and "dialects" in infos:
             lang = infos["langs"][b]
             dialect = infos["dialects"][b]
-            assert "tokenizer" in infos, "Please specify tokenizer!"
-            tokenizer: BaseTokenizer = infos["tokenizer"]
             prefix = tokenizer.tokens2ids(["<sos>", f"<{lang}>", f"<{dialect}>", "<asr>"])
 
             notimestamp = infos.get("notimestamp", True)
@@ -416,7 +412,7 @@ def attention_rescoring(
             hyps_lens = hyps_lens + 5
             prefix_len = 5
 
-        elif infos and "detect_dialect" in infos and infos["detect_dialect"]:
+        else:
             # detect dialact
             cache = {
                 "self_att_cache": {},
@@ -437,9 +433,7 @@ def attention_rescoring(
                 _, best_index = logp.topk(1, dim=-1)
                 prefix = torch.cat([prefix, best_index], dim=-1)
 
-            tokenizer = infos["tokenizer"]
             task_token_id = tokenizer.tokens2ids(["<asr>"])[0]
-
             notimestamp = infos.get("notimestamp", True)
             if notimestamp:
                 ts_token_id = tokenizer.tokens2ids(["<notimestamp>"])[0]
@@ -454,11 +448,6 @@ def attention_rescoring(
             hyps_pad = pad_list(ys, eos)
             hyps_lens = hyps_lens + 5
             prefix_len = 5
-
-        else:
-            hyps_pad, _ = add_sos_eos(hyps_pad, sos, eos, model.ignore_id)
-            hyps_lens = hyps_lens + 1  # Add <sos> at begining
-            prefix_len = 1
 
         decoder_out, r_decoder_out = model.forward_attention_decoder(hyps_pad, hyps_lens, encoder_out, reverse_weight)
         # Only use decoder score for rescoring
