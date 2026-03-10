@@ -7,10 +7,11 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.nn.utils.rnn import pad_sequence
 
+from dolphin.tokenizer import BaseTokenizer
 from dolphin.context_graph import ContextState, ContextGraph
 from dolphin.common import add_sos_eos, log_add, mask_to_bias, pad_list
 from dolphin.mask import (subsequent_mask, mask_finished_preds,
-                  mask_finished_scores, make_pad_mask)
+                          mask_finished_scores, make_pad_mask)
 
 
 def remove_duplicates_and_blank(hyp: List[int],
@@ -395,77 +396,71 @@ def attention_rescoring(
                                  device=device,
                                  dtype=torch.long)  # (beam_size,)
 
-        if model.special_tokens and "<asr>" in model.special_tokens:
-            if infos and "langs" in infos and "dialects" in infos:
-                lang = infos["langs"][b]
-                dialect = infos["dialects"][b]
-                assert "tokenizer" in infos, "Please specify tokenizer!"
-                tokenizer = infos["tokenizer"]
-                prefix = tokenizer.tokens2ids(["<sos>", f"<{lang}>", f"<{dialect}>", "<asr>"])
+        if infos and "langs" in infos and "dialects" in infos:
+            lang = infos["langs"][b]
+            dialect = infos["dialects"][b]
+            assert "tokenizer" in infos, "Please specify tokenizer!"
+            tokenizer: BaseTokenizer = infos["tokenizer"]
+            prefix = tokenizer.tokens2ids(["<sos>", f"<{lang}>", f"<{dialect}>", "<asr>"])
 
-                notimestamp = infos.get("notimestamp", True)
-                if notimestamp:
-                    prefix.append(tokenizer.tokens2ids(["<notimestamp>"])[0])
-                else:
-                    prefix.append(tokenizer.tokens2ids(["<0.0>"])[0])
-                prefix = torch.tensor(prefix, dtype=hyps_pad.dtype, device=hyps_pad.device)
-
-                ys = [y[y != model.ignore_id] for y in hyps_pad]
-                ys = [torch.cat([prefix, y]) for y in ys]
-                hyps_pad = pad_list(ys, eos)
-                hyps_lens = hyps_lens + 5
-                prefix_len = 5
-
-            elif infos and "detect_dialect" in infos and infos["detect_dialect"]:
-                # detect dialact
-                cache = {
-                    "self_att_cache": {},
-                    "cross_att_cache": {},
-                }
-                running_size = batch_size
-                if model.decoder.use_sdpa:
-                    encoder_mask = mask_to_bias(encoder_mask, encoder_out.dtype)
-
-                prefix = torch.ones([running_size, 1], dtype=torch.long, device=device).fill_(model.sos)
-                # detect language and dialect
-                for i in range(1, 3):
-                    prefix_mask = subsequent_mask(i).unsqueeze(0).repeat(running_size, 1, 1).to(device)  # (B*N, i, i)
-                    if model.decoder.use_sdpa:
-                        prefix_mask = mask_to_bias(prefix_mask, encoder_out.dtype)
-                    # logp: (B*N, vocab)
-                    logp = model.decoder.forward_one_step(encoder_out, encoder_mask, prefix, prefix_mask, cache)
-                    _, best_index = logp.topk(1, dim=-1)
-                    prefix = torch.cat([prefix, best_index], dim=-1)
-
-                tokenizer = infos["tokenizer"]
-                task_token_id = tokenizer.tokens2ids(["<asr>"])[0]
-
-                notimestamp = infos.get("notimestamp", True)
-                if notimestamp:
-                    ts_token_id = tokenizer.tokens2ids(["<notimestamp>"])[0]
-                else:
-                    ts_token_id = tokenizer.tokens2ids(["<0.0>"])[0]
-                task_ts_token_ids = torch.tensor([[task_token_id, ts_token_id]], dtype=torch.long, device=hyps_pad.device).repeat(batch_size, 1)
-                bs = hyps_pad.size(0)
-                prefix = torch.cat([prefix, task_ts_token_ids], dim=-1).repeat(bs, 1)
-
-                ys = torch.cat([prefix, hyps_pad], dim=-1)
-                ys = [y[y != model.ignore_id] for y in ys]
-                hyps_pad = pad_list(ys, eos)
-                hyps_lens = hyps_lens + 5
-                prefix_len = 5
-
+            notimestamp = infos.get("notimestamp", True)
+            if notimestamp:
+                prefix.append(tokenizer.tokens2ids(["<notimestamp>"])[0])
             else:
-                hyps_pad, _ = add_sos_eos(hyps_pad, sos, eos, model.ignore_id)
-                hyps_lens = hyps_lens + 1  # Add <sos> at begining
-                prefix_len = 1
+                prefix.append(tokenizer.tokens2ids(["<0.0>"])[0])
+            prefix = torch.tensor(prefix, dtype=hyps_pad.dtype, device=hyps_pad.device)
+
+            ys = [y[y != model.ignore_id] for y in hyps_pad]
+            ys = [torch.cat([prefix, y]) for y in ys]
+            hyps_pad = pad_list(ys, eos)
+            hyps_lens = hyps_lens + 5
+            prefix_len = 5
+
+        elif infos and "detect_dialect" in infos and infos["detect_dialect"]:
+            # detect dialact
+            cache = {
+                "self_att_cache": {},
+                "cross_att_cache": {},
+            }
+            running_size = batch_size
+            if model.decoder.use_sdpa:
+                encoder_mask = mask_to_bias(encoder_mask, encoder_out.dtype)
+
+            prefix = torch.ones([running_size, 1], dtype=torch.long, device=device).fill_(model.sos)
+            # detect language and dialect
+            for i in range(1, 3):
+                prefix_mask = subsequent_mask(i).unsqueeze(0).repeat(running_size, 1, 1).to(device)  # (B*N, i, i)
+                if model.decoder.use_sdpa:
+                    prefix_mask = mask_to_bias(prefix_mask, encoder_out.dtype)
+                # logp: (B*N, vocab)
+                logp = model.decoder.forward_one_step(encoder_out, encoder_mask, prefix, prefix_mask, cache)
+                _, best_index = logp.topk(1, dim=-1)
+                prefix = torch.cat([prefix, best_index], dim=-1)
+
+            tokenizer = infos["tokenizer"]
+            task_token_id = tokenizer.tokens2ids(["<asr>"])[0]
+
+            notimestamp = infos.get("notimestamp", True)
+            if notimestamp:
+                ts_token_id = tokenizer.tokens2ids(["<notimestamp>"])[0]
+            else:
+                ts_token_id = tokenizer.tokens2ids(["<0.0>"])[0]
+            task_ts_token_ids = torch.tensor([[task_token_id, ts_token_id]], dtype=torch.long, device=hyps_pad.device).repeat(batch_size, 1)
+            bs = hyps_pad.size(0)
+            prefix = torch.cat([prefix, task_ts_token_ids], dim=-1).repeat(bs, 1)
+
+            ys = torch.cat([prefix, hyps_pad], dim=-1)
+            ys = [y[y != model.ignore_id] for y in ys]
+            hyps_pad = pad_list(ys, eos)
+            hyps_lens = hyps_lens + 5
+            prefix_len = 5
+
         else:
             hyps_pad, _ = add_sos_eos(hyps_pad, sos, eos, model.ignore_id)
             hyps_lens = hyps_lens + 1  # Add <sos> at begining
             prefix_len = 1
 
-        decoder_out, r_decoder_out = model.forward_attention_decoder(
-            hyps_pad, hyps_lens, encoder_out, reverse_weight)
+        decoder_out, r_decoder_out = model.forward_attention_decoder(hyps_pad, hyps_lens, encoder_out, reverse_weight)
         # Only use decoder score for rescoring
         best_score = -float('inf')
         best_index = 0
@@ -496,10 +491,16 @@ def attention_rescoring(
                 best_score = score.item()
                 best_index = i
             tokens_confidences.append(tc)
-        results.append(
-            DecodeResult(hyps[best_index],
-                         best_score,
-                         confidence=confidences[best_index],
-                         times=ctc_prefix_results[b].nbest_times[best_index],
-                         tokens_confidence=tokens_confidences[best_index]))
+
+        tokens = hyps_pad[best_index]
+        tokens = tokens[(tokens!=sos)&(tokens!=eos)&(tokens!=model.ignore_id)]
+        decode_result = DecodeResult(
+            tokens.tolist(),
+            best_score,
+            confidence=confidences[best_index],
+            times=ctc_prefix_results[b].nbest_times[best_index],
+            tokens_confidence=tokens_confidences[best_index]
+        )
+        results.append(decode_result)
+
     return results
