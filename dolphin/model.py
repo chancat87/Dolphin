@@ -2,7 +2,7 @@ import os
 import math
 import logging
 import dataclasses
-from typing import List, Tuple, Union, Optional, Dict
+from typing import List, Tuple, Union, Optional, Dict, Any
 
 import torch
 import torch.nn as nn
@@ -2024,6 +2024,8 @@ class ASRModel(torch.nn.Module):
         #     smoothing=lsm_weight,
         #     normalize_length=length_normalized_loss,
         # )
+        self._model_configs = None
+        self._device = None
 
     @torch.jit.unused
     def forward(
@@ -2319,6 +2321,22 @@ class ASRModel(torch.nn.Module):
         """ Export interface for c++ call, return eos symbol id of the model
         """
         return self.eos
+
+    @property
+    def model_configs(self) -> Dict[str, Any]:
+        return self._model_configs
+
+    @model_configs.setter
+    def model_configs(self, configs: Dict[str, Any]):
+        self._model_configs = configs
+
+    @property
+    def device(self):
+        return self._device
+
+    @device.setter
+    def device(self, device: str):
+        self._device = device
 
     @torch.jit.export
     def forward_encoder_chunk(
