@@ -2018,12 +2018,7 @@ class ASRModel(torch.nn.Module):
         self.encoder = encoder
         self.decoder = decoder
         self.ctc = ctc
-        # self.criterion_att = LabelSmoothingLoss(
-        #     size=vocab_size,
-        #     padding_idx=ignore_id,
-        #     smoothing=lsm_weight,
-        #     normalize_length=length_normalized_loss,
-        # )
+
         self._model_configs = None
         self._device = None
 
@@ -2132,41 +2127,6 @@ class ASRModel(torch.nn.Module):
         encoder_mask = ~make_pad_mask(xs_lens, T).unsqueeze(1)  # (B, 1, T)
         encoder_out = select_encoder_out
         return encoder_out, encoder_mask
-
-    # def _calc_att_loss(
-    #     self,
-    #     encoder_out: torch.Tensor,
-    #     encoder_mask: torch.Tensor,
-    #     ys_pad: torch.Tensor,
-    #     ys_pad_lens: torch.Tensor,
-    #     infos: Dict[str, List[str]] = None,
-    # ) -> Tuple[torch.Tensor, torch.Tensor]:
-    #     ys_in_pad, ys_out_pad = add_sos_eos(ys_pad, self.sos, self.eos,
-    #                                         self.ignore_id)
-    #     ys_in_lens = ys_pad_lens + 1
-
-    #     # reverse the seq, used for right to left decoder
-    #     r_ys_pad = reverse_pad_list(ys_pad, ys_pad_lens, float(self.ignore_id))
-    #     r_ys_in_pad, r_ys_out_pad = add_sos_eos(r_ys_pad, self.sos, self.eos,
-    #                                             self.ignore_id)
-    #     # 1. Forward decoder
-    #     decoder_out, r_decoder_out, _ = self.decoder(encoder_out, encoder_mask,
-    #                                                  ys_in_pad, ys_in_lens,
-    #                                                  r_ys_in_pad,
-    #                                                  self.reverse_weight)
-    #     # 2. Compute attention loss
-    #     loss_att = self.criterion_att(decoder_out, ys_out_pad)
-    #     r_loss_att = torch.tensor(0.0)
-    #     if self.reverse_weight > 0.0:
-    #         r_loss_att = self.criterion_att(r_decoder_out, r_ys_out_pad)
-    #     loss_att = loss_att * (
-    #         1 - self.reverse_weight) + r_loss_att * self.reverse_weight
-    #     acc_att = th_accuracy(
-    #         decoder_out.view(-1, self.vocab_size),
-    #         ys_out_pad,
-    #         ignore_label=self.ignore_id,
-    #     )
-    #     return loss_att, acc_att
 
     def _forward_encoder(
         self,

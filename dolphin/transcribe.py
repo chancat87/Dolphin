@@ -173,16 +173,16 @@ def validate_lang_region(lang_sym: str, region_sym: str):
 
 
 def transcribe_long(
-        model: ASRModel,
-        audio: str,
-        lang_sym: str = None,
-        region_sym: str = None,
-        predict_time: bool = True,
-        padding_speech: bool = False,
-        decoding_method: str = "attention_rescoring",
-        beam_size: int = 10,
-        **kwargs,
-    ) -> List[TranscribeSegmentResult]:
+    model: ASRModel,
+    audio: str,
+    lang_sym: str = None,
+    region_sym: str = None,
+    predict_time: bool = True,
+    padding_speech: bool = False,
+    decoding_method: str = "attention_rescoring",
+    beam_size: int = 10,
+    **kwargs,
+) -> List[TranscribeSegmentResult]:
     """
     Transcribe audio to text.
 
@@ -293,16 +293,16 @@ def _filter_nonspecial_tokens(tokens: List[int], tokenizer: BaseTokenizer) -> Li
 
 
 def transcribe(
-        model: ASRModel,
-        audio: str,
-        lang_sym: str = None,
-        region_sym: str = None,
-        predict_time: bool = True,
-        padding_speech: bool = False,
-        decoding_method: str = "attention_rescoring",
-        beam_size: int = 10,
-        **kwargs,
-    ) -> TranscribeResult:
+    model: ASRModel,
+    audio: str,
+    lang_sym: str = None,
+    region_sym: str = None,
+    predict_time: bool = True,
+    padding_speech: bool = False,
+    decoding_method: str = "attention_rescoring",
+    beam_size: int = 10,
+    **kwargs,
+) -> TranscribeResult:
     """
     Transcribe audio to text.
 
