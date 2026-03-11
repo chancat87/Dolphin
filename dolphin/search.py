@@ -14,8 +14,7 @@ from dolphin.mask import (subsequent_mask, mask_finished_preds,
                           mask_finished_scores, make_pad_mask)
 
 
-def remove_duplicates_and_blank(hyp: List[int],
-                                blank_id: int = 0) -> List[int]:
+def remove_duplicates_and_blank(hyp: List[int], blank_id: int = 0) -> List[int]:
     new_hyp: List[int] = []
     cur = 0
     while cur < len(hyp):
@@ -104,9 +103,11 @@ class PrefixScore:
         self.context_state = context_state
 
 
-def ctc_greedy_search(ctc_probs: torch.Tensor,
-                      ctc_lens: torch.Tensor,
-                      blank_id: int = 0) -> List[DecodeResult]:
+def ctc_greedy_search(
+        ctc_probs: torch.Tensor,
+        ctc_lens: torch.Tensor,
+        blank_id: int = 0
+) -> List[DecodeResult]:
     batch_size = ctc_probs.shape[0]
     maxlen = ctc_probs.size(1)
     topk_prob, topk_index = ctc_probs.topk(1, dim=2)  # (B, maxlen, 1)
@@ -263,7 +264,11 @@ def attention_beam_search(
     encoder_dim = encoder_out.size(2)
     running_size = batch_size * beam_size
 
-    if infos and "langs" in infos and "dialects" in infos:
+    assert infos is not None, "must specify tokenizer via infos variable!"
+    assert "tokenizer" in infos, "Please specify tokenizer!"
+    tokenizer: BaseTokenizer = infos["tokenizer"]
+
+    if "langs" in infos and "dialects" in infos:
         assert "tokenizer" in infos, "Please specify tokenizer!"
         tokenizer = infos["tokenizer"]
 
@@ -273,6 +278,7 @@ def attention_beam_search(
         dialects = [dialect for dialect in dialects for _ in range(beam_size)]
         notimestamp = infos.get("notimestamp", True)
 
+        # TODO unknown symbol
         hyps = add_dolphin_tokens(tokenizer, langs, dialects, notimestamp, device) # type: ignore
     else:
         hyps = torch.ones([running_size, 1], dtype=torch.long, device=device).fill_(model.sos)  # (B*N, 1)
@@ -379,6 +385,7 @@ def attention_rescoring(
     assert encoder_outs.shape[0] == len(ctc_prefix_results)
     batch_size = encoder_outs.shape[0]
 
+    assert infos is not None, "must specify tokenizer via infos variable!"
     assert "tokenizer" in infos, "Please specify tokenizer!"
     tokenizer: BaseTokenizer = infos["tokenizer"]
 
@@ -394,16 +401,13 @@ def attention_rescoring(
                                  device=device,
                                  dtype=torch.long)  # (beam_size,)
 
-        if infos and "langs" in infos and "dialects" in infos:
+        if "langs" in infos and "dialects" in infos:
             lang = infos["langs"][b]
             dialect = infos["dialects"][b]
             prefix = tokenizer.tokens2ids(["<sos>", f"<{lang}>", f"<{dialect}>", "<asr>"])
 
-            notimestamp = infos.get("notimestamp", True)
-            if notimestamp:
-                prefix.append(tokenizer.tokens2ids(["<notimestamp>"])[0])
-            else:
-                prefix.append(tokenizer.tokens2ids(["<0.0>"])[0])
+            ts_token_id = tokenizer.tokens2ids(["<notimestamp>"])[0]
+            prefix.append(ts_token_id)
             prefix = torch.tensor(prefix, dtype=hyps_pad.dtype, device=hyps_pad.device)
 
             ys = [y[y != model.ignore_id] for y in hyps_pad]
@@ -434,11 +438,7 @@ def attention_rescoring(
                 prefix = torch.cat([prefix, best_index], dim=-1)
 
             task_token_id = tokenizer.tokens2ids(["<asr>"])[0]
-            notimestamp = infos.get("notimestamp", True)
-            if notimestamp:
-                ts_token_id = tokenizer.tokens2ids(["<notimestamp>"])[0]
-            else:
-                ts_token_id = tokenizer.tokens2ids(["<0.0>"])[0]
+            ts_token_id = tokenizer.tokens2ids(["<notimestamp>"])[0]
             task_ts_token_ids = torch.tensor([[task_token_id, ts_token_id]], dtype=torch.long, device=hyps_pad.device).repeat(batch_size, 1)
             bs = hyps_pad.size(0)
             prefix = torch.cat([prefix, task_ts_token_ids], dim=-1).repeat(bs, 1)
