@@ -1,15 +1,20 @@
 from pathlib import Path
-from typing import List, Dict, Tuple
+from typing import List, Dict, Union
 
 import torch
 import torchaudio
+import numpy as np
 from torch.nn.utils.rnn import pad_sequence
 
 
-def extract_feats(audios: List[Path], configs: Dict) -> Dict[str, torch.Tensor]:
+def extract_feats(audios: List[Union[Path, torch.Tensor]], configs: Dict) -> Dict[str, torch.Tensor]:
     feats = []
     for audio in audios:
-        waveform, sample_rate = torchaudio.load(audio)
+        if isinstance(audio, torch.Tensor):
+            waveform = audio
+            sample_rate = 16000
+        else:
+            waveform, sample_rate = torchaudio.load(audio)
 
         # single channel
         channel_nums = waveform.size(0)
