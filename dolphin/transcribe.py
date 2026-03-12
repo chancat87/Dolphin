@@ -292,6 +292,26 @@ def _filter_nonspecial_tokens(tokens: List[int], tokenizer: BaseTokenizer) -> Li
     return nonspecial_tokens
 
 
+def detect_language(model: ASRModel, audio: str) -> Tuple[str, str]:
+    """
+    Detect language and dialect.
+    """
+    lang = ""
+    dialect = ""
+
+    batch = extract_feats([audio], model.model_configs)
+    batch["feats"] = batch["feats"].to(model.device)
+    batch["feats_lengths"] = batch["feats_lengths"].to(model.device)
+
+    ret = model.detect_language(batch["feats"], batch["feats_lengths"])
+    tokenizer = init_tokenizer(model.model_configs)
+    lang, dialect = tokenizer.ids2tokens(ret.tolist()[0])
+    lang = lang[1:-1]
+    dialect = dialect[1:-1]
+
+    return (lang, dialect)
+
+
 def transcribe(
     model: ASRModel,
     audio: str,

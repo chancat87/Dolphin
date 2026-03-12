@@ -2178,6 +2178,31 @@ class ASRModel(torch.nn.Module):
 
         return ctc_probs
 
+
+    def detect_language(
+        self,
+        speech: torch.Tensor,
+        speech_lengths: torch.Tensor
+    ) -> torch.Tensor:
+        assert speech.shape[0] == speech_lengths.shape[0]
+        encoder_out, encoder_mask = self._forward_encoder(speech, speech_lengths)
+
+        cache = {
+            "self_att_cache": {},
+            "cross_attn_cache": {}
+        }
+        batch_size = speech.size(0)
+        prefix = torch.ones([batch_size, 1], dtype=torch.long, device=self.device).fill_(self.sos)
+        for i in range(1, 3):
+            prefix_mask = subsequent_mask(i).unsqueeze(0).repeat(batch_size, 1, 1).to(self.device)
+            if self.decoder.use_sdpa:
+                prefix_mask = mask_to_bias(prefix_mask, encoder_out.dtype)
+            logp = self.decoder.forward_one_step(encoder_out, encoder_mask, prefix, prefix_mask, cache)
+            _, indices = logp.topk(1, dim=-1)
+            prefix = torch.cat([prefix, indices], dim=-1)
+
+        return prefix[:, 1:]
+
     def decode(
         self,
         methods: List[str],
