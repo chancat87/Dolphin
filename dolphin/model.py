@@ -2,8 +2,10 @@ import os
 import math
 import logging
 import dataclasses
+from pathlib import Path
 from typing import List, Tuple, Union, Optional, Dict, Any
 
+import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -455,7 +457,10 @@ class RelPositionMultiHeadedAttention(MultiHeadedAttention):
         x_padded = x_padded.view(x.size()[0],
                                  x.size()[1],
                                  x.size(3) + 1, x.size(2))
-        x = x_padded[:, :, 1:].view_as(x)
+        # x = x_padded[:, :, 1:].view_as(x)
+        x = x_padded[:, :, 1:].view_as(x)[
+            :, :, :, : x.size(-1) // 2 + 1
+        ]  # only keep the positions from 0 to time2
 
         if zero_triu:
             ones = torch.ones((x.size(2), x.size(3)))
@@ -506,10 +511,15 @@ class RelPositionMultiHeadedAttention(MultiHeadedAttention):
         # compute matrix b and matrix d
         # (batch, head, time1, time2)
         matrix_bd = torch.matmul(q_with_bias_v, p.transpose(-2, -1))
-        # Remove rel_shift since it is useless in speech recognition,
-        # and it requires special attention for streaming.
-        # matrix_bd = self.rel_shift(matrix_bd)
+
         if not self.use_sdpa:
+            # Remove rel_shift since it is useless in speech recognition,
+            # and it requires special attention for streaming.
+            matrix_bd = self.rel_shift(matrix_bd)
+            # wenet remove rel_shift, but it required by espnet, restore it.
+            # dolphin_small trained by espnet framework,
+            # and dolphin_small.zh trained by wenet framework.
+
             # compute attention score
             # first compute matrix a and matrix c
             # as described in https://arxiv.org/abs/1901.02860 Section 3.3
@@ -2488,6 +2498,76 @@ class ASRModel(torch.nn.Module):
         return decoder_out, r_decoder_out
 
 
+
+class GlobalMVN(nn.Module):
+    """Apply global mean and variance normalization
+
+    Args:
+        stats_file: npy file
+        norm_means: Apply mean normalization
+        norm_vars: Apply var normalization
+        eps:
+    """
+
+    def __init__(
+        self,
+        stats_file: Union[Path, str],
+        norm_means: bool = True,
+        norm_vars: bool = True,
+        eps: float = 1.0e-20,
+    ):
+        super().__init__()
+        self.norm_means = norm_means
+        self.norm_vars = norm_vars
+        self.eps = eps
+        stats_file = Path(stats_file)
+
+        self.stats_file = stats_file
+        stats = np.load(stats_file)
+        count = stats["count"]
+        sum_v = stats["sum"]
+        sum_square_v = stats["sum_square"]
+        mean = sum_v / count
+        var = sum_square_v / count - mean * mean
+        std = np.sqrt(np.maximum(var, eps))
+
+        if isinstance(mean, np.ndarray):
+            mean = torch.from_numpy(mean)
+        else:
+            mean = torch.tensor(mean).float()
+        if isinstance(std, np.ndarray):
+            std = torch.from_numpy(std)
+        else:
+            std = torch.tensor(std).float()
+
+        self.register_buffer("mean", mean)
+        self.register_buffer("std", std)
+
+    def forward(
+        self,
+        x: torch.Tensor,
+        # ilens: torch.Tensor = None
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
+        """Forward function
+        Args:
+            x: (B, L, ...)
+            ilens: (B,)
+        """
+        norm_means = self.norm_means
+        norm_vars = self.norm_vars
+        self.mean = self.mean.to(x.device, x.dtype)
+        self.std = self.std.to(x.device, x.dtype)
+
+        # feat: (B, T, D)
+        if norm_means:
+            x -= self.mean
+
+        if norm_vars:
+            x /= self.std
+
+        return x
+
+
 class GlobalCMVN(torch.nn.Module):
 
     def __init__(self,
@@ -2521,11 +2601,14 @@ class GlobalCMVN(torch.nn.Module):
 
 
 def init_speech_model(configs: Dict) -> ASRModel:
-    cmvn = load_json_cmvn(configs["cmvn_conf"]["cmvn_file"])
-    mean, istd = cmvn[0], cmvn[1]
-    global_cmvn = GlobalCMVN(
-        torch.from_numpy(mean).float(),
-        torch.from_numpy(istd).float())
+    if configs["cmvn"] == "global_mvn":
+        global_cmvn = GlobalMVN(configs["cmvn_conf"]["cmvn_file"])
+    else:
+        cmvn = load_json_cmvn(configs["cmvn_conf"]["cmvn_file"])
+        mean, istd = cmvn[0], cmvn[1]
+        global_cmvn = GlobalCMVN(
+            torch.from_numpy(mean).float(),
+            torch.from_numpy(istd).float())
 
     input_dim = configs["input_dim"]
     vocab_size = configs["output_dim"]
