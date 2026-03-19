@@ -90,9 +90,9 @@ class BpeTokenizer(CharTokenizer):
     ) -> None:
         super().__init__(symbol_table=symbol_table)
         self._model = bpe_model
+        self.sp = None
 
     def _build_sp(self):
-        # Build SentencePieceProcessor lazily.
         if self.sp is None:
             import sentencepiece as spm
             self.sp = spm.SentencePieceProcessor()
@@ -115,7 +115,7 @@ def init_tokenizer(configs) -> BaseTokenizer:
     elif tokenizer_type == "bpe":
         tokenizer = BpeTokenizer(
             bpe_model=tokenizer_conf["bpe_path"],
-            symbol_table=tokenizer_conf["symbole_table_path"]
+            symbol_table=tokenizer_conf["symbol_table_path"]
         )
     else:
         assert False, f"{tokenizer_type} is not supported!"
