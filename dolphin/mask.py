@@ -2,7 +2,12 @@ import random
 import torch
 
 
-def make_pad_mask(lengths: torch.Tensor, max_len: int = 0) -> torch.Tensor:
+def make_pad_mask(
+    lengths: torch.Tensor,
+    max_len: int = 0,
+    xs: torch.Tensor = None,
+    length_dim: int = -1,
+) -> torch.Tensor:
     """Make mask tensor containing indices of padded part.
 
     See description of make_non_pad_mask.
@@ -28,6 +33,18 @@ def make_pad_mask(lengths: torch.Tensor, max_len: int = 0) -> torch.Tensor:
     seq_range_expand = seq_range.unsqueeze(0).expand(batch_size, max_len)
     seq_length_expand = lengths.unsqueeze(-1)
     mask = seq_range_expand >= seq_length_expand
+
+    if xs is not None:
+        assert (xs.size(0) == batch_size), f"The size of x.size(0) {xs.size(0)} must match the batch size {batch_size}"
+
+        if length_dim < 0:
+            length_dim = xs.dim() + length_dim
+        # ind = (:, None, ..., None, :, , None, ..., None)
+        ind = tuple(
+            slice(None) if i in (0, length_dim) else None for i in range(xs.dim())
+        )
+        mask = mask[ind].expand_as(xs).to(xs.device)
+
     return mask
 
 
