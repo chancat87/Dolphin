@@ -399,11 +399,6 @@ class DefaultFrontend(nn.Module):
         self.apply_stft = apply_stft
 
         self.frontend = Frontend(idim=n_fft // 2 + 1)
-        # if frontend_conf is not None:
-        #     self.frontend = Frontend(idim=n_fft // 2 + 1, **frontend_conf)
-        # else:
-        #     self.frontend = None
-
         self.logmel = LogMel(
             fs=fs,
             n_fft=n_fft,
@@ -3063,16 +3058,11 @@ class GlobalMVN(nn.Module):
             x: (B, L, ...)
             ilens: (B,)
         """
-        norm_means = self.norm_means
-        norm_vars = self.norm_vars
-        self.mean = self.mean.to(x.device, x.dtype)
-        self.std = self.std.to(x.device, x.dtype)
-
         # feat: (B, T, D)
-        if norm_means:
+        if self.norm_means:
             x -= self.mean
 
-        if norm_vars:
+        if self.norm_vars:
             x /= self.std
 
         return x
