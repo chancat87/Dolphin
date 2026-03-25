@@ -27,6 +27,7 @@ from distutils.util import strtobool
 from typing import Union, Optional, Tuple, List, Dict, Any
 
 import torch
+import torch.nn as nn
 import modelscope
 from modelscope.models.audio.funasr.model import GenericFunASR
 try:
@@ -149,11 +150,17 @@ def load_model(
     model = init_speech_model(configs)
     state_dict = torch.load(model_dir / f"{model_name}.pt", map_location="cpu")
     model.load_state_dict(state_dict)
+    model.model_configs = configs
     model = model.to(device)
+    model.device = device
     model.eval()
 
-    model.model_configs = configs
-    model.device = device
+    # Compatible with old version model framework
+    if "layer_norm_eps" in model.model_configs:
+        layer_norm_eps = float(model.model_configs["layer_norm_eps"])
+        for m in model.modules():
+            if isinstance(m, nn.LayerNorm):
+                m.eps = layer_norm_eps
 
     return model
 
