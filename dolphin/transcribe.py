@@ -11,6 +11,7 @@ logging.getLogger("espnet").setLevel(logging.ERROR)
 logging.getLogger("root").setLevel(logging.ERROR)
 logging.getLogger("dolphin").setLevel(logging.INFO)
 
+import math
 import yaml
 import tqdm
 import pydub
@@ -45,6 +46,7 @@ from dolphin.languages import LANGUAGE_REGION_CODES, LANGUAGE_CODES
 from dolphin.constants import SPEECH_LENGTH
 from dolphin.model_registry import MODELS
 from dolphin.tokenizer import init_tokenizer, BaseTokenizer
+
 
 logger = logging.getLogger("dolphin")
 
@@ -100,6 +102,31 @@ def seconds_to_hms(total_seconds: int):
         return f"{minutes:02d}:{seconds:02d}"
 
 
+def convert_v1_state_dict(state_dict: Dict[str, Any]) -> Dict[str, Any]:
+    def generate_pe(d_model: int):
+        pe = torch.zeros(5000, d_model)
+        position = torch.arange(0, 5000,dtype=torch.float32).unsqueeze(1)
+        div_term = torch.exp(torch.arange(0, d_model, 2, dtype=torch.float32) * -(math.log(10000.0) / d_model))
+        pe[:, 0::2] = torch.sin(position * div_term)
+        pe[:, 1::2] = torch.cos(position * div_term)
+        pe = pe.unsqueeze(0)
+
+        return pe
+
+    d_model = state_dict["decoder.output_layer.weight"].size(-1)
+    pe = generate_pe(d_model)
+
+    state_dict["encoder.global_cmvn.mean"] = state_dict["normalize.mean"]
+    state_dict["encoder.global_cmvn.std"] = state_dict["normalize.std"]
+    state_dict["decoder.embed.1.pe"] = pe
+
+    del state_dict["normalize.mean"]
+    del state_dict["normalize.std"]
+    del state_dict["frontend.logmel.melmat"]
+
+    return state_dict
+
+
 def load_model(
     model_name: str,
     model_dir: Union[Path, str],
@@ -149,6 +176,8 @@ def load_model(
 
     model = init_speech_model(configs)
     state_dict = torch.load(model_dir / f"{model_name}.pt", map_location="cpu")
+    state_dict = convert_v1_state_dict(state_dict) if "normalize.mean" in state_dict else state_dict
+
     model.load_state_dict(state_dict)
     model.model_configs = configs
     model = model.to(device)
