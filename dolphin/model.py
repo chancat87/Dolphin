@@ -21,6 +21,7 @@ from dolphin.mask import (add_optional_chunk_mask, make_pad_mask,
 from dolphin.search import (attention_beam_search, attention_rescoring,
                     ctc_greedy_search, ctc_prefix_beam_search,
                     DecodeResult)
+from dolphin.tokenizer import BaseTokenizer
 
 T_CACHE = Tuple[torch.Tensor, torch.Tensor]
 
@@ -2717,6 +2718,65 @@ class ASRModel(torch.nn.Module):
             prefix = torch.cat([prefix, indices], dim=-1)
 
         return prefix[:, 1:]
+
+    def predict_lang_region_timestamp(
+        self,
+        tokenizer: BaseTokenizer,
+        encoder_out: torch.Tensor,
+        lang_ids: Optional[List[int]] = None,
+        region_ids: Optional[List[int]] = None,
+        need_timestamp: bool = False,
+    ) -> Tuple[int]:
+        cache = {
+            "self_att_cache": {},
+            "cross_att_cache": {}
+        }
+        batch_size, time, _ = encoder_out.size()
+        encoder_mask = torch.ones(batch_size, 1, time).bool().to(self.device)
+
+        prefix = torch.ones([batch_size, 1], dtype=torch.long, device=self.device).fill_(self.sos)
+        if lang_ids is not None:
+            lang_ids: torch.Tensor = torch.tensor(lang_ids, dtype=torch.long, device=self.device).unsqueeze(1)
+            assert lang_ids.size(0) == batch_size
+            prefix = torch.cat([prefix, lang_ids], dim=-1)
+
+            if region_ids is not None:
+                region_ids: torch.Tensor = torch.tensor(region_ids, dtype=torch.long, device=self.device).unsqueeze(1)
+                assert region_ids.size(0) == batch_size
+                prefix = torch.cat([prefix, region_ids], dim=-1)
+
+                start_idx = 3
+            else:
+                start_idx = 2
+        else:
+            start_idx = 1
+
+        start_tm_id, end_tm_id = tokenizer.tokens2ids(["<0.00>", "<30.00>"])
+        no_tm_id = tokenizer.tokens2ids(["<notimestamp>"])[0]
+        timestamp_idx = 4
+
+        # predict lang, region and timestamp
+        for i in range(start_idx, 5):
+            if i == timestamp_idx and need_timestamp is False:
+                tm_ids = torch.tensor([no_tm_id], dtype=torch.long, device=self.device).expand((batch_size, 1))
+                prefix = torch.cat([prefix, tm_ids], dim=-1)
+                continue
+
+            prefix_mask = subsequent_mask(i).unsqueeze(0).repeat(batch_size, 1, 1).to(self.device)
+            if self.decoder.use_sdpa:
+                prefix_mask = mask_to_bias(prefix_mask, encoder_out.dtype)
+            logp = self.decoder.forward_one_step(encoder_out, encoder_mask, prefix, prefix_mask, cache)
+
+            if i == timestamp_idx:
+                # only predict timestamp token id
+                logp[..., :start_tm_id] = float("-inf")
+                logp[..., end_tm_id+1:] = float("-inf")
+
+            _, indices = logp.topk(1, dim=-1)
+            prefix = torch.cat([prefix, indices], dim=-1)
+
+        return prefix[:, 1:]
+
 
     def decode(
         self,
