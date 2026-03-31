@@ -264,24 +264,45 @@ def attention_beam_search(
     encoder_dim = encoder_out.size(2)
     running_size = batch_size * beam_size
 
-    assert infos is not None, "must specify tokenizer via infos variable!"
+    need_timestamp = infos.get("need_timestamp", False)
     assert "tokenizer" in infos, "Please specify tokenizer!"
     tokenizer: BaseTokenizer = infos["tokenizer"]
 
-    if "langs" in infos and "dialects" in infos:
-        assert "tokenizer" in infos, "Please specify tokenizer!"
-        tokenizer = infos["tokenizer"]
+    if "langs" in infos:
+        hyps = torch.ones([running_size, 1], dtype=torch.long, device=device).fill_(model.sos)  # (B*N, 1)
+        langs = infos.get("langs", None)
+        if langs is not None:
+            assert len(langs) == batch_size
 
-        langs = infos["langs"]
-        dialects = infos["dialects"]
-        langs = [lang for lang in langs for _ in range(beam_size)]
-        dialects = [dialect for dialect in dialects for _ in range(beam_size)]
-        notimestamp = infos.get("notimestamp", True)
+            regions = infos.get("regions", None)
+            if regions is not None:
+                assert len(regions) == batch_size
 
-        # TODO unknown symbol
-        hyps = add_dolphin_tokens(tokenizer, langs, dialects, notimestamp, device) # type: ignore
+            lang_ids = tokenizer.tokens2ids(langs) if langs is not None else None
+            region_ids = tokenizer.tokens2ids(regions) if regions is not None else None
+
+            ret: torch.Tensor = model.predict_lang_region_timestamp(
+                tokenizer,
+                encoder_out,
+                lang_ids=lang_ids,
+                region_ids=region_ids,
+                need_timestamp=need_timestamp,
+            )
+            hyps = torch.ones([running_size, 1], dtype=torch.long, device=device).fill_(model.sos)  # (B*N, 1)
+            hyps = torch.cat([hyps, ret.repeat(1, beam_size).view(running_size, -1)], dim=-1)
+
     else:
         hyps = torch.ones([running_size, 1], dtype=torch.long, device=device).fill_(model.sos)  # (B*N, 1)
+        if need_timestamp is True:
+            # if need_timestamp specified, predict language, region and timestamp
+            ret: torch.Tensor = model.predict_lang_region_timestamp(
+                tokenizer,
+                encoder_out,
+                lang_ids=None,
+                region_ids=None,
+                need_timestamp=need_timestamp,
+            )
+            hyps = torch.cat([hyps, ret.repeat(1, beam_size).view(running_size, -1)], dim=-1)
 
     prefix_len = hyps.size(1)
     scores = torch.tensor([0.0] + [-float('inf')] * (beam_size - 1),
@@ -401,53 +422,38 @@ def attention_rescoring(
                                  device=device,
                                  dtype=torch.long)  # (beam_size,)
 
-        if "langs" in infos and "dialects" in infos:
-            lang = infos["langs"][b]
-            dialect = infos["dialects"][b]
-            prefix = tokenizer.tokens2ids(["<sos>", f"<{lang}>", f"<{dialect}>", "<asr>"])
+        lang_id = None
+        region_id = None
 
-            ts_token_id = tokenizer.tokens2ids(["<notimestamp>"])[0]
-            prefix.append(ts_token_id)
-            prefix = torch.tensor(prefix, dtype=hyps_pad.dtype, device=hyps_pad.device)
+        langs = infos.get("langs", None)
+        regions = infos.get("regions", None)
+        if langs is not None:
+            lang = langs[b]
+            lang_id = tokenizer.tokens2ids([lang])[0]
+            if regions is not None:
+                region = regions[b]
+                region_id = tokenizer.tokens2ids([region])[0]
 
-            ys = [y[y != model.ignore_id] for y in hyps_pad]
-            ys = [torch.cat([prefix, y]) for y in ys]
-            hyps_pad = pad_list(ys, eos)
-            hyps_lens = hyps_lens + 5
-            prefix_len = 5
+        if region_id is None:
+            ret = model.predict_lang_region_timestamp(
+                tokenizer,
+                encoder_out,
+                lang_ids=[lang_id] if lang_id is not None else None,
+                region_ids=None,
+                need_timestamp=False
+            )
+            lang_id = ret[0, 0].item()
+            region_id = ret[0, 1].item()
 
-        else:
-            # detect dialact
-            cache = {
-                "self_att_cache": {},
-                "cross_att_cache": {},
-            }
-            running_size = batch_size
-            if model.decoder.use_sdpa:
-                encoder_mask = mask_to_bias(encoder_mask, encoder_out.dtype)
+        task_id = tokenizer.tokens2ids(["<asr>"])[0]
+        time_id = tokenizer.tokens2ids(["<notimestamp>"])[0]
+        prefix = torch.tensor([sos, lang_id, region_id, task_id, time_id], dtype=torch.long, device=device)
 
-            prefix = torch.ones([running_size, 1], dtype=torch.long, device=device).fill_(model.sos)
-            # detect language and dialect
-            for i in range(1, 3):
-                prefix_mask = subsequent_mask(i).unsqueeze(0).repeat(running_size, 1, 1).to(device)  # (B*N, i, i)
-                if model.decoder.use_sdpa:
-                    prefix_mask = mask_to_bias(prefix_mask, encoder_out.dtype)
-                # logp: (B*N, vocab)
-                logp = model.decoder.forward_one_step(encoder_out, encoder_mask, prefix, prefix_mask, cache)
-                _, best_index = logp.topk(1, dim=-1)
-                prefix = torch.cat([prefix, best_index], dim=-1)
-
-            task_token_id = tokenizer.tokens2ids(["<asr>"])[0]
-            ts_token_id = tokenizer.tokens2ids(["<notimestamp>"])[0]
-            task_ts_token_ids = torch.tensor([[task_token_id, ts_token_id]], dtype=torch.long, device=hyps_pad.device).repeat(batch_size, 1)
-            bs = hyps_pad.size(0)
-            prefix = torch.cat([prefix, task_ts_token_ids], dim=-1).repeat(bs, 1)
-
-            ys = torch.cat([prefix, hyps_pad], dim=-1)
-            ys = [y[y != model.ignore_id] for y in ys]
-            hyps_pad = pad_list(ys, eos)
-            hyps_lens = hyps_lens + 5
-            prefix_len = 5
+        ys = [y[y != model.ignore_id] for y in hyps_pad]
+        ys = [torch.cat([prefix, y]) for y in ys]
+        hyps_pad = pad_list(ys, eos)
+        hyps_lens = hyps_lens + 5
+        prefix_len = 5
 
         decoder_out, r_decoder_out = model.forward_attention_decoder(hyps_pad, hyps_lens, encoder_out, reverse_weight)
         # Only use decoder score for rescoring
