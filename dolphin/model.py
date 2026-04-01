@@ -14,7 +14,6 @@ import torch.nn.functional as F
 from torch.nn.utils.rnn import pad_sequence
 from torch_complex.tensor import ComplexTensor
 
-from dolphin.context_graph import ContextGraph
 from dolphin.common import add_sos_eos, load_json_cmvn, IGNORE_ID
 from dolphin.mask import (add_optional_chunk_mask, make_pad_mask,
                   mask_to_bias, subsequent_mask)
@@ -2789,7 +2788,7 @@ class ASRModel(torch.nn.Module):
         ctc_weight: float = 0.0,
         simulate_streaming: bool = False,
         reverse_weight: float = 0.0,
-        context_graph: ContextGraph = None,
+        context_graph = None,
         blank_id: int = 0,
         blank_penalty: float = 0.0,
         length_penalty: float = 0.0,

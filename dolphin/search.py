@@ -8,7 +8,6 @@ import torch.nn.functional as F
 from torch.nn.utils.rnn import pad_sequence
 
 from dolphin.tokenizer import BaseTokenizer
-from dolphin.context_graph import ContextState, ContextGraph
 from dolphin.common import add_sos_eos, log_add, mask_to_bias, pad_list
 from dolphin.mask import (subsequent_mask, mask_finished_preds,
                           mask_finished_scores, make_pad_mask)
@@ -66,7 +65,7 @@ class PrefixScore:
                  ns: float = float('-inf'),
                  v_s: float = float('-inf'),
                  v_ns: float = float('-inf'),
-                 context_state: ContextState = None,
+                 context_state = None,
                  context_score: float = 0.0):
         self.s = s  # blank_ending_score
         self.ns = ns  # none_blank_ending_score
@@ -127,7 +126,7 @@ def ctc_prefix_beam_search(
     ctc_probs: torch.Tensor,
     ctc_lens: torch.Tensor,
     beam_size: int,
-    context_graph: ContextGraph = None,
+    context_graph = None,
     blank_id: int = 0,
 ) -> List[DecodeResult]:
     """
