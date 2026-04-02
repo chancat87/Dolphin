@@ -165,7 +165,7 @@ def ctc_prefix_beam_search(
                                                prefix_score.score() + prob)
                         next_score.v_s = prefix_score.viterbi_score() + prob
                         next_score.times_s = prefix_score.times().copy()
-                        # perfix not changed, copy the context from prefix
+                        # prefix not changed, copy the context from prefix
                         if context_graph and not next_score.has_context:
                             next_score.copy_context(prefix_score)
                             next_score.has_context = True
