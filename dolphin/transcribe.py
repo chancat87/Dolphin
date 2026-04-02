@@ -65,13 +65,15 @@ def parser_args() -> Namespace:
     parser.add_argument("--model", type=str, default="small", help="model name (default: small)")
     parser.add_argument("--model_dir", type=Path, default=None, help="model checkpoint download diretory")
     parser.add_argument("--lang_sym", type=str, default=None, help="language symbol (e.g. zh)")
-    parser.add_argument("--region_sym", type=str, default=None, help="regiion symbol (e.g. CN)")
+    parser.add_argument("--region_sym", type=str, default=None, help="region symbol (e.g. CN)")
     parser.add_argument("--device", type=str, default=None, help="torch device (default: None)")
-    parser.add_argument("--normalize_length", type=str2bool, default=False, help="whether to normalize length (default: false)")
-    parser.add_argument("--padding_speech", type=str2bool, default=False, help="whether padding speech to 30 seconds (default: false)")
     parser.add_argument("--predict_time", type=str2bool, default=True, help="whether predict timestamp (default: true)")
-    parser.add_argument("--beam_size", type=int, default=5, help="number of beams in beam search (default: 5)")
-    parser.add_argument("--maxlenratio", type=float, default=0.0, help="Input length ratio to obtain max output length (default: 0.0)")
+    parser.add_argument("--beam_size", type=int, default=10, help="number of beams in beam search (default: 10)")
+    parser.add_argument("--decoding_method", type=str, default="attention_rescoring",
+                        help="decoding methods, supports: attention, attention_rescoring (default: attention_rescoring)")
+    parser.add_argument("--maxlenratio", type=float, default=0.0, help="deprecated, Input length ratio to obtain max output length (default: 0.0)")
+    parser.add_argument("--padding_speech", type=str2bool, default=False, help="deprecated, whether padding speech to 30 seconds (default: false)")
+    parser.add_argument("--normalize_length", type=str2bool, default=False, help="deprecated, whether to normalize length (default: false)")
 
     args = parser.parse_args()
     return args
@@ -159,7 +161,7 @@ def load_model(
         if hashlib.sha256(model_bytes).hexdigest() == MODELS[model_name]["sha256"]:
             download_model = False
         else:
-            logger.warning("model SHA256 chechsum mismatch, redownload model...")
+            logger.warning("model SHA256 checksum mismatch, redownload model...")
 
     if download_model:
         model_dir.mkdir(parents=True, exist_ok=True)
@@ -228,8 +230,8 @@ def transcribe_long(
         lang_sym: language symbol (e.g. zh)
         region_sym: region symbol (e.g. CN)
         predict_time: whether predict timestamp (default: true)
-        padding_speech: depreacted, whether padding speech to 30 seconds (default: false)
-        decoding_method: decoding methods, supports: attetion_rescoring (default), attention
+        padding_speech: deprecated, whether padding speech to 30 seconds (default: false)
+        decoding_method: decoding methods, supports: attention, attention_rescoring (default: attention_rescoring)
 
     Returns:
         List[TranscribeSegmentResult]
@@ -376,7 +378,7 @@ def transcribe(
         region_sym: region symbol (e.g. CN)
         predict_time: whether predict timestamp (default: false)
         padding_speech: depreacted, whether padding speech to 30 seconds (default: false)
-        decoding_method: decoding methods, supports: attetion_rescoring (default), attention
+        decoding_method: decoding methods, supports: attention, attention_rescoring (default: attention_rescoring)
 
     Returns:
         TranscribeResult
@@ -447,6 +449,7 @@ def cli():
         "region_sym": args.region_sym,
         "predict_time": args.predict_time,
         "padding_speech": args.padding_speech,
+        "decoding_method": args.decoding_method,
     }
     transcribe_fn(**transcribe_params)
 
