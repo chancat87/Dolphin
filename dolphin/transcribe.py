@@ -276,12 +276,22 @@ def transcribe_long(
         batch["feats"] = batch["feats"].to(model.device)
         batch["feats_lengths"] = batch["feats_lengths"].to(model.device)
 
+        lang_tokens = [f"<{lang_sym}>"] if lang_sym is not None else None
+        region_tokens = [f"<{region_sym}>"] if region_sym is not None else None
+        need_timestamp = True if predict_time and model.model_configs.get("support_timestamp", False) else False
+
+        decoding_infos = {
+            "tokenizer": tokenizer,
+            "langs": lang_tokens,
+            "regions": region_tokens,
+            "need_timestamp": need_timestamp
+        }
         ret = model.decode(
             methods=[decoding_method],
             speech=batch["feats"],
             speech_lengths=batch["feats_lengths"],
             beam_size=beam_size,
-            infos={"tokenizer": tokenizer}
+            infos=decoding_infos
         )
         tokens = ret[decoding_method][0].tokens
         nonspecial_tokens = _filter_nonspecial_tokens(tokens, tokenizer)
@@ -350,7 +360,7 @@ def transcribe(
     audio: str,
     lang_sym: str = None,
     region_sym: str = None,
-    predict_time: bool = True,
+    predict_time: bool = False,
     padding_speech: bool = False,
     decoding_method: str = "attention_rescoring",
     beam_size: int = 10,
@@ -364,7 +374,7 @@ def transcribe(
         audio: audio path
         lang_sym: language symbol (e.g. zh)
         region_sym: region symbol (e.g. CN)
-        predict_time: whether predict timestamp (default: true)
+        predict_time: whether predict timestamp (default: false)
         padding_speech: depreacted, whether padding speech to 30 seconds (default: false)
         decoding_method: decoding methods, supports: attetion_rescoring (default), attention
 
@@ -378,13 +388,23 @@ def transcribe(
     batch["feats"] = batch["feats"].to(model.device)
     batch["feats_lengths"] = batch["feats_lengths"].to(model.device)
 
+    lang_tokens = [f"<{lang_sym}>"] if lang_sym is not None else None
+    region_tokens = [f"<{region_sym}>"] if region_sym is not None else None
+
     tokenizer = init_tokenizer(model.model_configs)
+    need_timestamp = True if predict_time and model.model_configs.get("support_timestamp", False) else False
+    decoding_infos = {
+        "tokenizer": tokenizer,
+        "langs": lang_tokens,
+        "regions": region_tokens,
+        "need_timestamp": need_timestamp
+    }
     ret = model.decode(
         methods=[decoding_method],
         speech=batch["feats"],
         speech_lengths=batch["feats_lengths"],
         beam_size=beam_size,
-        infos={"tokenizer": tokenizer}
+        infos=decoding_infos
     )
 
     tokens = ret[decoding_method][0].tokens
