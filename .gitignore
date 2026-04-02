@@ -170,3 +170,7 @@ cython_debug/
 # PyPI configuration file
 .pypirc
 test.ipynb
+data
+wenet
+espnet_model.py
+*.bak
