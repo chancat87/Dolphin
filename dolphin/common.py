@@ -8,55 +8,6 @@ import torch
 IGNORE_ID = -1
 
 
-def pad_list(xs: List[torch.Tensor], pad_value: int):
-    """Perform padding for the list of tensors.
-
-    Args:
-        xs (List): List of Tensors [(T_1, `*`), (T_2, `*`), ..., (T_B, `*`)].
-        pad_value (float): Value for padding.
-
-    Returns:
-        Tensor: Padded tensor (B, Tmax, `*`).
-
-    Examples:
-        >>> x = [torch.ones(4), torch.ones(2), torch.ones(1)]
-        >>> x
-        [tensor([1., 1., 1., 1.]), tensor([1., 1.]), tensor([1.])]
-        >>> pad_list(x, 0)
-        tensor([[1., 1., 1., 1.],
-                [1., 1., 0., 0.],
-                [1., 0., 0., 0.]])
-
-    """
-    max_len = max([len(item) for item in xs])
-    batchs = len(xs)
-    ndim = xs[0].ndim
-    if ndim == 1:
-        pad_res = torch.zeros(batchs,
-                              max_len,
-                              dtype=xs[0].dtype,
-                              device=xs[0].device)
-    elif ndim == 2:
-        pad_res = torch.zeros(batchs,
-                              max_len,
-                              xs[0].shape[1],
-                              dtype=xs[0].dtype,
-                              device=xs[0].device)
-    elif ndim == 3:
-        pad_res = torch.zeros(batchs,
-                              max_len,
-                              xs[0].shape[1],
-                              xs[0].shape[2],
-                              dtype=xs[0].dtype,
-                              device=xs[0].device)
-    else:
-        raise ValueError(f"Unsupported ndim: {ndim}")
-    pad_res.fill_(pad_value)
-    for i in range(batchs):
-        pad_res[i, :len(xs[i])] = xs[i]
-    return pad_res
-
-
 def add_sos_eos(ys_pad: torch.Tensor, sos: int, eos: int,
                 ignore_id: int) -> Tuple[torch.Tensor, torch.Tensor]:
     """Add <sos> and <eos> labels.
