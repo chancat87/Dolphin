@@ -2704,7 +2704,7 @@ class ASRModel(torch.nn.Module):
 
         cache = {
             "self_att_cache": {},
-            "cross_attn_cache": {}
+            "cross_att_cache": {}
         }
         batch_size = speech.size(0)
         prefix = torch.ones([batch_size, 1], dtype=torch.long, device=self.device).fill_(self.sos)
@@ -2725,7 +2725,7 @@ class ASRModel(torch.nn.Module):
         lang_ids: Optional[List[int]] = None,
         region_ids: Optional[List[int]] = None,
         need_timestamp: bool = False,
-    ) -> Tuple[int]:
+    ) -> torch.Tensor:
         cache = {
             "self_att_cache": {},
             "cross_att_cache": {}
