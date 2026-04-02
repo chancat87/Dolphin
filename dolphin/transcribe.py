@@ -170,8 +170,8 @@ def load_model(
             repo_type="model",
         )
 
-    assert (model_dir / "config.yaml").exists(), "model config not found, please redownload model!"
-    with open(model_dir / "config.yaml") as f:
+    assert (model_dir / "train.yaml").exists(), "model config not found, please redownload model!"
+    with open(model_dir / "train.yaml") as f:
         configs = yaml.load(f, Loader=yaml.Loader)
 
     model = init_speech_model(configs)
