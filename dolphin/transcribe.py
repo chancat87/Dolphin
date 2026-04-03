@@ -6,7 +6,7 @@ import warnings
 LOGGING_FORMAT="[%(asctime)s] [%(levelname)s] [%(filename)s:%(lineno)d:%(funcName)s] %(message)s"
 logging.basicConfig(level=logging.INFO, format=LOGGING_FORMAT)
 warnings.filterwarnings("ignore", category=FutureWarning)
-# filter framework interanl logs
+# filter framework internal logs
 logging.getLogger("espnet").setLevel(logging.ERROR)
 logging.getLogger("root").setLevel(logging.ERROR)
 logging.getLogger("dolphin").setLevel(logging.INFO)
@@ -15,7 +15,6 @@ import math
 import yaml
 import tqdm
 import pydub
-import logging
 import hashlib
 import os.path
 import argparse
@@ -23,7 +22,6 @@ import dataclasses
 import numpy as np
 from pathlib import Path
 from argparse import Namespace
-from os.path import dirname, join, abspath, join
 from distutils.util import strtobool
 from typing import Union, Optional, Tuple, List, Dict, Any
 
@@ -37,7 +35,7 @@ try:
 except:
     torch_npu_is_imported = False
 
-from dolphin.audio import load_audio, convert_audio
+from dolphin.audio import convert_audio
 # from dolphin.model import DolphinSpeech2Text, TranscribeResult, TranscribeSegmentResult
 from dolphin.processor import extract_feats
 from dolphin.model import (ASRModel, init_speech_model,
@@ -63,7 +61,7 @@ def parser_args() -> Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("audio", type=str, help="audio file path")
     parser.add_argument("--model", type=str, default="small", help="model name (default: small)")
-    parser.add_argument("--model_dir", type=Path, default=None, help="model checkpoint download diretory")
+    parser.add_argument("--model_dir", type=Path, default=None, help="model checkpoint download directory")
     parser.add_argument("--lang_sym", type=str, default=None, help="language symbol (e.g. zh)")
     parser.add_argument("--region_sym", type=str, default=None, help="region symbol (e.g. CN)")
     parser.add_argument("--device", type=str, default=None, help="torch device (default: None)")
@@ -200,10 +198,10 @@ def validate_lang_region(lang_sym: str, region_sym: str):
 
     if all([lang_sym, region_sym]):
         if f"{lang_sym}-{region_sym}" not in LANGUAGE_REGION_CODES:
-            raise Exception("Unsupport language or region!")
+            raise Exception("Unsupported language or region!")
     elif any([lang_sym, region_sym]):
         if lang_sym is not None and region_sym is None:
-            assert lang_sym in LANGUAGE_CODES, "Unsupport language!"
+            assert lang_sym in LANGUAGE_CODES, "Unsupported language!"
         elif lang_sym is None and region_sym is not None:
             assert False, "If you specify a dialect, you must configure the language!"
 
@@ -377,7 +375,7 @@ def transcribe(
         lang_sym: language symbol (e.g. zh)
         region_sym: region symbol (e.g. CN)
         predict_time: whether predict timestamp (default: false)
-        padding_speech: depreacted, whether padding speech to 30 seconds (default: false)
+        padding_speech: deprecated, whether padding speech to 30 seconds (default: false)
         decoding_method: decoding methods, supports: attention, attention_rescoring (default: attention_rescoring)
 
     Returns:
@@ -450,6 +448,7 @@ def cli():
         "predict_time": args.predict_time,
         "padding_speech": args.padding_speech,
         "decoding_method": args.decoding_method,
+        "beam_size": args.beam_size,
     }
     transcribe_fn(**transcribe_params)
 
