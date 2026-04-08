@@ -437,6 +437,7 @@ def cli():
     logger.info("loading asr model")
     device = args.device if args.device else detect_device()
     model_instance = load_model(model, model_dir, device)
+    logger.info(f"model loaded successfuly, device: {device}")
 
     audio_duration = pydub.AudioSegment.from_file(args.audio).duration_seconds
     transcribe_fn = transcribe_long if audio_duration > SPEECH_LENGTH else transcribe

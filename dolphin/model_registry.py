@@ -10,6 +10,6 @@ MODELS = {
     },
     "small.zh": {
         "model_id": "DataoceanAI/dolphin-small-zh",
-        "sha256": "558a77994668afda64e230b1e10c4580940fc338bf150d310d577d2b4c109ec9",
+        "sha256": "1e62b572f92e61d830b8cec3483e2e7d1c667ab989c3754495507da9a429a4c1",
     }
 }
