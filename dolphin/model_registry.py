@@ -8,6 +8,10 @@ MODELS = {
         "model_id": "DataoceanAI/dolphin-small",
         "sha256": "4a0c6c636657121ec2a2b656e97e45b29a8b29c92fa3998006e02ab146d8ac51",
     },
+    "base.zh": {
+        "model_id": "DataoceanAI/dolphin-base-zh",
+        "sha256": "eb91a21b89c2589b948671fb7b3cc362130ba04c9d1130f15fb3a8a0808d9964"
+    },
     "small.zh": {
         "model_id": "DataoceanAI/dolphin-small-zh",
         "sha256": "1e62b572f92e61d830b8cec3483e2e7d1c667ab989c3754495507da9a429a4c1",
