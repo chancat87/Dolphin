@@ -160,6 +160,8 @@ def load_model(
             download_model = False
         else:
             logger.warning("model SHA256 checksum mismatch, redownload model...")
+    else:
+        logger.info(f"model {model_ckpt_file} not exists, download...")
 
     if download_model:
         model_dir.mkdir(parents=True, exist_ok=True)
@@ -173,6 +175,8 @@ def load_model(
     assert (model_dir / "train.yaml").exists(), "model config not found, please redownload model!"
     with open(model_dir / "train.yaml") as f:
         configs = yaml.load(f, Loader=yaml.Loader)
+        configs["cmvn_conf"]["cmvn_file"] = str(model_dir / "global_cmvn")
+        configs["tokenizer_conf"]["symbol_table_path"] = str(model_dir / "units.txt")
 
     model = init_speech_model(configs)
     state_dict = torch.load(model_dir / f"{model_name}.pt", map_location="cpu")
@@ -434,8 +438,8 @@ def cli():
     model_dir = args.model_dir if args.model_dir else os.path.expanduser(f"~/.cache/dolphin/{model}")
     model_dir = Path(model_dir)
 
-    logger.info("loading asr model")
     device = args.device if args.device else detect_device()
+    logger.info(f"loading asr model, device: {device}")
     model_instance = load_model(model, model_dir, device)
     logger.info(f"model loaded successfuly, device: {device}")
 

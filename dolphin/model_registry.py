@@ -10,7 +10,11 @@ MODELS = {
     },
     "base.zh": {
         "model_id": "DataoceanAI/dolphin-base-zh",
-        "sha256": "eb91a21b89c2589b948671fb7b3cc362130ba04c9d1130f15fb3a8a0808d9964"
+        "sha256": "6c7a746c225f0f406053c9ebbdced7b79cfb91051d8060da3f1a26aa7913648b"
+    },
+    "base.zh.streaming": {
+        "model_id": "DataoceanAI/dolphin-base-zh-streaming",
+        "sha256": "62e4c11fe1e0e42bd34e444172c5a05e792c4b5a03750f794fa3206fc0649cd7"
     },
     "small.zh": {
         "model_id": "DataoceanAI/dolphin-small-zh",
