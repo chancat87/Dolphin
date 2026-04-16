@@ -175,7 +175,12 @@ def load_model(
     assert (model_dir / "train.yaml").exists(), "model config not found, please redownload model!"
     with open(model_dir / "train.yaml") as f:
         configs = yaml.load(f, Loader=yaml.Loader)
-        configs["cmvn_conf"]["cmvn_file"] = str(model_dir / "global_cmvn")
+        if configs["cmvn"] == "global_mvn":
+            configs["cmvn_conf"]["cmvn_file"] = str(model_dir / "feats_stats.npz")
+        else:
+            configs["cmvn_conf"]["cmvn_file"] = str(model_dir / "global_cmvn")
+
+
         configs["tokenizer_conf"]["symbol_table_path"] = str(model_dir / "units.txt")
 
     model = init_speech_model(configs)
