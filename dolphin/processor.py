@@ -10,8 +10,6 @@ from torch_complex.tensor import ComplexTensor
 
 from dolphin.model import DefaultFrontend
 
-frontend = None
-
 
 def extract_feats(audios: List[Union[Path, torch.Tensor]], configs: Dict) -> Dict[str, torch.Tensor]:
     feats = []
@@ -33,10 +31,8 @@ def extract_feats(audios: List[Union[Path, torch.Tensor]], configs: Dict) -> Dic
 
         # fbank feats
         if "frontend_conf" in configs["dataset_conf"]:
-            global frontend
-            if frontend is None:
-                frontend = DefaultFrontend(**configs["dataset_conf"]["frontend_conf"])
-                frontend.eval()
+            frontend = DefaultFrontend(**configs["dataset_conf"]["frontend_conf"])
+            frontend.eval()
             lengths = torch.tensor([waveform.size(-1)], dtype=torch.long)
             feats.append(frontend(waveform, lengths)[0][0])
         else:
