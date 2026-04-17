@@ -257,22 +257,3 @@ def mask_finished_scores(score: torch.Tensor,
     score.masked_fill_(unfinished, -float('inf'))
     score.masked_fill_(finished, 0)
     return score
-
-
-def mask_finished_preds(pred: torch.Tensor, flag: torch.Tensor,
-                        eos: int) -> torch.Tensor:
-    """
-    If a sequence is finished, all of its branch should be <eos>
-
-    Args:
-        pred (torch.Tensor): A int array with shape
-            (batch_size * beam_size, beam_size).
-        flag (torch.Tensor): A bool array with shape
-            (batch_size * beam_size, 1).
-
-    Returns:
-        torch.Tensor: (batch_size * beam_size).
-    """
-    beam_size = pred.size(-1)
-    finished = flag.repeat([1, beam_size])
-    return pred.masked_fill_(finished, eos)

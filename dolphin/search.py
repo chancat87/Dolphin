@@ -8,9 +8,9 @@ import torch.nn.functional as F
 from torch.nn.utils.rnn import pad_sequence
 
 from dolphin.tokenizer import BaseTokenizer
-from dolphin.common import add_sos_eos, log_add, mask_to_bias, pad_list
+from dolphin.common import add_sos_eos, log_add, pad_list
 from dolphin.mask import (subsequent_mask, mask_finished_preds,
-                          mask_finished_scores, make_pad_mask)
+                          mask_finished_scores, make_pad_mask, mask_to_bias)
 
 
 def remove_duplicates_and_blank(hyp: List[int], blank_id: int = 0) -> List[int]:
