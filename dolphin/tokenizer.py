@@ -112,7 +112,8 @@ def init_tokenizer(configs) -> BaseTokenizer:
             symbol_table=tokenizer_conf['symbol_table_path'],
             connect_symbol=tokenizer_conf.get('connect_symbol', '')
         )
-    elif tokenizer_type == "bpe":
+    elif tokenizer_type == "bpe" or tokenizer_type == "dolphin_bpe":
+        # dolphin_bpe uses the same format as bpe
         tokenizer = BpeTokenizer(
             bpe_model=tokenizer_conf["bpe_path"],
             symbol_table=tokenizer_conf["symbol_table_path"]

@@ -21,6 +21,7 @@ from dolphin.search import (attention_beam_search, attention_rescoring,
                     ctc_greedy_search, ctc_prefix_beam_search,
                     DecodeResult)
 from dolphin.tokenizer import BaseTokenizer
+from dolphin.hotword import apply_deep_biasing
 
 T_CACHE = Tuple[torch.Tensor, torch.Tensor]
 
@@ -2536,6 +2537,7 @@ class ASRModel(torch.nn.Module):
 
         self._model_configs = None
         self._device = None
+        self.context_module = None
 
     @torch.jit.unused
     def forward(
@@ -2826,6 +2828,54 @@ class ASRModel(torch.nn.Module):
             num_decoding_left_chunks, simulate_streaming)
         encoder_lens = encoder_mask.squeeze(1).sum(1)
         ctc_probs = self.ctc_logprobs(encoder_out, blank_penalty, blank_id)
+
+        # Apply deep-biasing if hotwords are provided
+        if (infos is not None and infos.get("use_deep_biasing", False)
+                and infos.get("hotwords") is not None):
+            # Use hotword_encoder from infos (passed from transcribe.py)
+            # or from model.context_module (built-in hotword encoder)
+            hotword_encoder = infos.get("hotword_encoder")
+            if hotword_encoder is None and self.context_module is not None:
+                hotword_encoder = self.context_module
+            if hotword_encoder is not None:
+                encoder_out, context_list = apply_deep_biasing(
+                    encoder_out,
+                    ctc_probs,
+                    hotword_encoder,
+                    infos["hotwords"],
+                    use_two_stage_filter=infos.get("use_two_stage_filter", False),
+                    filter_threshold=infos.get("filter_threshold", -2.0),
+                    deep_biasing_score=infos.get("deep_biasing_score", 0.5)
+                )
+
+        # Prepare prompt-based hotwords if enabled
+        if (infos is not None and infos.get("use_prompt_hotword", False)
+                and infos.get("hotwords") is not None):
+            from dolphin.transcribe import _prepare_prompt_hotwords
+            batch_size = encoder_out.shape[0]
+            ctc_probs_list = [ctc_probs[b] for b in range(batch_size)]
+            use_filter = infos.get("use_two_stage_filter", False)
+            prompts = _prepare_prompt_hotwords(
+                batch_size=batch_size,
+                ctc_probs_list=ctc_probs_list,
+                hotword_token_ids=infos["hotwords"],
+                tokenizer=infos["tokenizer"],
+                use_two_stage_filter=use_filter,
+                filter_threshold=infos.get("filter_threshold", -4.0),
+                filter_window_size=infos.get("filter_window_size", 64)
+            )
+            print(prompts)
+            infos["prompt"] = prompts
+        else:
+            tokenizer = infos["tokenizer"]
+            if '<PROMPT_START>' in tokenizer.symbol_table and \
+                '<PROMPT_END>' in tokenizer.symbol_table:
+                prompt_start_id = tokenizer.tokens2ids(["<PROMPT_START>"])[0]
+                prompt_end_id = tokenizer.tokens2ids(["<PROMPT_END>"])[0]
+                prompts = [torch.tensor([prompt_start_id, prompt_end_id], 
+                                        dtype=torch.long, device=speech.device)] * speech.shape[0]
+            
+                infos["prompt"] = prompts
         results = {}
         if 'attention' in methods:
             results['attention'] = attention_beam_search(
