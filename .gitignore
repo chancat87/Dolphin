@@ -176,3 +176,4 @@ espnet_model.py
 *.bak
 examples
 .vscode
+CLAUDE.md
