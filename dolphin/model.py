@@ -2832,21 +2832,16 @@ class ASRModel(torch.nn.Module):
         # Apply deep-biasing if hotwords are provided
         if (infos is not None and infos.get("use_deep_biasing", False)
                 and infos.get("hotwords") is not None):
-            # Use hotword_encoder from infos (passed from transcribe.py)
-            # or from model.context_module (built-in hotword encoder)
-            hotword_encoder = infos.get("hotword_encoder")
-            if hotword_encoder is None and self.context_module is not None:
-                hotword_encoder = self.context_module
-            if hotword_encoder is not None:
-                encoder_out, context_list = apply_deep_biasing(
-                    encoder_out,
-                    ctc_probs,
-                    hotword_encoder,
-                    infos["hotwords"],
-                    use_two_stage_filter=infos.get("use_two_stage_filter", False),
-                    filter_threshold=infos.get("filter_threshold", -2.0),
-                    deep_biasing_score=infos.get("deep_biasing_score", 0.5)
-                )
+            assert self.context_module is not None
+            encoder_out, context_list = apply_deep_biasing(
+                encoder_out,
+                ctc_probs,
+                self.context_module,
+                infos["hotwords"],
+                use_two_stage_filter=infos.get("use_two_stage_filter", False),
+                filter_threshold=infos.get("filter_threshold", -2.0),
+                deep_biasing_score=infos.get("deep_biasing_score", 0.5)
+            )
 
         # Prepare prompt-based hotwords if enabled
         if (infos is not None and infos.get("use_prompt_hotword", False)
@@ -2861,7 +2856,7 @@ class ASRModel(torch.nn.Module):
                 hotword_token_ids=infos["hotwords"],
                 tokenizer=infos["tokenizer"],
                 use_two_stage_filter=use_filter,
-                filter_threshold=infos.get("filter_threshold", -4.0),
+                filter_threshold=infos.get("filter_threshold", -2.0),
                 filter_window_size=infos.get("filter_window_size", 64)
             )
             infos["prompt"] = prompts

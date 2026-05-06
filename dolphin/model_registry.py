@@ -18,22 +18,14 @@ MODELS = {
     },
     "small.zh": {
         "model_id": "DataoceanAI/dolphin-small-zh",
-        "sha256": "1e62b572f92e61d830b8cec3483e2e7d1c667ab989c3754495507da9a429a4c1",
+        "sha256": "1cee2b8d2133cabb36567625a832d4033569e27eaf5f98df9be1139ec6068bbb",
     },
     "small.zh.streaming": {
         "model_id": "DataoceanAI/dolphin-small-zh-streaming",
-        "sha256": "5bb7ae10c762a3e93c8f10cbb7a553b1a73af3318cfd8b2ba59b822aa5b9b691",
-    },
-    "small.zh.hotwords": {
-        "model_id": "DataoceanAI/dolphin-small-zh-hotwords",
-        "sha256": "1cee2b8d2133cabb36567625a832d4033569e27eaf5f98df9be1139ec6068bbb",
-    },
-    "small.zh.streaming.hotwords": {
-        "model_id": "DataoceanAI/dolphin-small-zh-streaming-hotwords",
         "sha256": "bba8688ed33841b5f8b4578370be553f4557739c406dc7298f22985f7b061faf",
     },
     "small.zh.prompt": {
         "model_id": "DataoceanAI/dolphin-small-zh-prompt",
-        "sha256": "4cb43bd485fd5715163d30ee92ae5098c61e4319a0f5769fb2516e6f6e8641b3",
+        "sha256": "fdd09034024fc3aee16c89f678461791b2eb4ac0ae880da4ea6141e0e32f409b",
     },
 }

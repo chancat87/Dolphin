@@ -75,10 +75,10 @@ def parser_args() -> Namespace:
     parser.add_argument("--normalize_length", type=str2bool, default=False, help="deprecated, whether to normalize length (default: false)")
     parser.add_argument("--hotword_str", type=str, default=None, help="comma-separated hotwords (e.g. '张三,李四')")
     parser.add_argument("--hotword_list_path", type=Path, default=None, help="path to hotword list file")
-    parser.add_argument("--use_deep_biasing", type=str2bool, default=True, help="use deep biasing for hotwords (default: true)")
+    parser.add_argument("--use_deep_biasing", type=str2bool, default=False, help="use deep biasing for hotwords (default: false)")
     parser.add_argument("--use_two_stage_filter", type=str2bool, default=False, help="use two-stage filtering for hotwords (default: false)")
     parser.add_argument("--use_prompt_hotword", type=str2bool, default=False, help="use prompt-based hotword (default: false)")
-    parser.add_argument("--prompt_filter_threshold", type=float, default=-4.0, help="filter threshold for prompt hotwords (default: -4.0)")
+    parser.add_argument("--prompt_filter_threshold", type=float, default=-2.0, help="filter threshold for prompt hotwords (default: -2.0)")
 
     args = parser.parse_args()
     return args
@@ -269,10 +269,10 @@ def transcribe_long(
     decoding_method: str = "attention_rescoring",
     beam_size: int = 10,
     hotwords: Optional[List[str]] = None,
-    use_deep_biasing: bool = True,
+    use_deep_biasing: bool = False,
     use_two_stage_filter: bool = False,
     use_prompt_hotword: bool = False,
-    prompt_filter_threshold: float = -4.0,
+    prompt_filter_threshold: float = -2.0,
     **kwargs,
 ) -> List[TranscribeSegmentResult]:
     """
@@ -287,10 +287,10 @@ def transcribe_long(
         padding_speech: deprecated, whether padding speech to 30 seconds (default: false)
         decoding_method: decoding methods, supports: attention, attention_rescoring (default: attention_rescoring)
         hotwords: list of hotword strings (default: None)
-        use_deep_biasing: whether use deep biasing for hotwords (default: true)
+        use_deep_biasing: whether use deep biasing for hotwords (default: false)
         use_two_stage_filter: whether use two-stage filtering (default: false)
         use_prompt_hotword: whether use prompt-based hotword (default: false)
-        prompt_filter_threshold: filter threshold for prompt hotwords (default: -4.0)
+        prompt_filter_threshold: filter threshold for prompt hotwords (default: -2.0)
 
     Returns:
         List[TranscribeSegmentResult]
@@ -331,7 +331,7 @@ def transcribe_long(
     # Process hotwords if provided
     hotword_token_ids = None
     hotword_encoder = None
-    if hotwords and use_deep_biasing:
+    if hotwords:
         # Convert hotword strings to token ID sequences
         hotword_token_ids = []
         for hw in hotwords:
@@ -342,17 +342,7 @@ def transcribe_long(
             if ids:
                 hotword_token_ids.append(ids)
 
-        if hotword_token_ids:
-            encoder_conf = model.model_configs.get("encoder_conf", {})
-            encoder_d_model = encoder_conf.get("output_size", 256)
-            hotword_encoder = HotwordEncoder(
-                vocab_size=tokenizer.vocab_size(),
-                embedding_size=encoder_d_model,
-                encoder_layers=2,
-                attention_heads=4,
-                dropout_rate=0.0
-            ).to(model.device)
-            logger.info(f"Using deep biasing with {len(hotword_token_ids)} hotwords")
+        logger.info(f"Using hotwords with {len(hotword_token_ids)} hotwords")
 
     audio_segment = pydub.AudioSegment.from_wav(tmp_audio)
     for seg in segments:
@@ -384,7 +374,10 @@ def transcribe_long(
             decoding_infos["hotwords"] = hotword_token_ids
             decoding_infos["use_prompt_hotword"] = True
             decoding_infos["filter_threshold"] = prompt_filter_threshold
+            decoding_infos["use_two_stage_filter"] = use_two_stage_filter
             decoding_infos["tokenizer"] = tokenizer
+            if decoding_method != 'attention':
+                logger.warning('[decoding_method -> attention] is much more better, maybe considering change it with --decoding_method attention')
 
         ret = model.decode(
             methods=[decoding_method],
@@ -394,6 +387,11 @@ def transcribe_long(
             infos=decoding_infos
         )
         tokens = ret[decoding_method][0].tokens
+
+        if use_prompt_hotword:
+            hotwords_text, tokens = _filter_prompt_tokens(tokens, tokenizer)
+            logger.info(f"Detected hotwords: {hotwords_text}")
+            
         nonspecial_tokens = _filter_nonspecial_tokens(tokens, tokenizer)
         lang = tokenizer.ids2tokens([tokens[0]])[0][1:-1]
         region = tokenizer.ids2tokens([tokens[1]])[0][1:-1]
@@ -471,7 +469,7 @@ def _prepare_prompt_hotwords(
         ctc_probs_list: List of CTC log probability tensors, one per sample (T, vocab_size).
         hotword_token_ids: All hotword token ID sequences.
         tokenizer: Tokenizer instance for getting PROMPT_START/PROMPT_END token IDs.
-        use_two_stage_filter: Whether to apply two-stage filtering (default: True).
+        use_two_stage_filter: Whether to apply two-stage filtering (default: False).
         filter_threshold: Threshold for two-stage filtering.
         filter_window_size: Window size for PSC/SOC calculation.
         max_hotwords_without_filter: Maximum hotwords to use when filtering is disabled (default: 10).
@@ -534,6 +532,26 @@ def _filter_nonspecial_tokens(tokens: List[int], tokenizer: BaseTokenizer) -> Li
 
     return nonspecial_tokens
 
+def _filter_prompt_tokens(tokens: List[int], tokenizer: BaseTokenizer) -> Tuple[str, List[int]]:
+    """
+    Filter out prompt tokens from the token list and get the detected hotwords text.
+
+    Args:
+        tokens: list of token ids
+        tokenizer: tokenizer instance
+
+    Returns:
+        detected hotwords text;
+        list of non-special token ids
+    """
+    prompt_start_id = tokenizer.tokens2ids(["<PROMPT_START>"])[0]
+    prompt_end_id = tokenizer.tokens2ids(["<PROMPT_END>"])[0]
+    prompt_start_pos, prompt_end_pos = tokens.index(prompt_start_id), tokens.index(prompt_end_id)
+    hotword_tokens = tokens[prompt_start_pos+1:prompt_end_pos]
+    hotwords_text = tokenizer.detokenize(hotword_tokens)[0]
+    tokens = tokens[prompt_end_pos+1:]
+
+    return hotwords_text, tokens
 
 def detect_language(model: ASRModel, audio: str) -> Tuple[str, str]:
     """
@@ -651,7 +669,11 @@ def transcribe(
             decoding_infos["hotwords"] = hotword_token_ids
             decoding_infos["use_prompt_hotword"] = True
             decoding_infos["filter_threshold"] = prompt_filter_threshold
+            decoding_infos["use_two_stage_filter"] = use_two_stage_filter
             logger.info(f"Using prompt hotword with {len(hotword_token_ids)} hotwords")
+            if decoding_method != 'attention':
+                logger.warning('[decoding_method -> attention] is much more better, maybe considering change it with --decoding_method attention')
+
 
     ret = model.decode(
         methods=[decoding_method],
@@ -662,6 +684,10 @@ def transcribe(
     )
 
     tokens = ret[decoding_method][0].tokens
+    if use_prompt_hotword or "<PROMPT_START>" in tokenizer.symbol_table:
+        hotwords_text, tokens = _filter_prompt_tokens(tokens, tokenizer)
+        if hotwords_text:
+            logger.info(f"Detected hotwords: {hotwords_text}")
     nonspecial_tokens = _filter_nonspecial_tokens(tokens, tokenizer)
     lang = tokenizer.ids2tokens([tokens[0]])[0][1:-1]
     region = tokenizer.ids2tokens([tokens[1]])[0][1:-1]
@@ -673,7 +699,7 @@ def transcribe(
         region=region,
     )
 
-    logger.info(f"decode result, language: {result.language}, region: {result.region}, text: {result.text}")
+    logger.info(f"decode result, language: {result.language}, region: {result.region}, text: {result.text_nospecial}")
     return result
 
 

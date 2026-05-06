@@ -4,6 +4,7 @@ Hotword encoder module for deep-biasing.
 
 This module provides hotword encoding using LSTM + Attention fusion
 to boost recognition of specific words/phrases during ASR decoding.
+refer to: https://arxiv.org/abs/2305.12493
 """
 
 import torch
@@ -180,6 +181,7 @@ def two_stage_filtering(
     Uses PSC (Peak-to-Side-Cluster) and SOC (Sum-to-Side-Cluster) scores
     to select relevant hotwords based on CTC posteriors.
 
+    refer to: https://arxiv.org/abs/2301.06735
     Args:
         context_list (List[List[int]]): List of hotword token ID sequences.
         ctc_posterior (torch.Tensor): (T, vocab_size) CTC log probabilities.
@@ -383,7 +385,6 @@ def apply_deep_biasing(
             for each_in_b in b_context_list:
                 if each_in_b not in context_list:
                     context_list.append(each_in_b)
-        print(context_list)
     # Prepare hotword tensor
     context_list_tensor, context_list_lengths = prepare_hotword_tensor(
         context_list, device
