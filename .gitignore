@@ -174,3 +174,4 @@ data
 wenet
 espnet_model.py
 *.bak
+CLAUDE.md
