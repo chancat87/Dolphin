@@ -2864,12 +2864,12 @@ class ASRModel(torch.nn.Module):
                 filter_threshold=infos.get("filter_threshold", -4.0),
                 filter_window_size=infos.get("filter_window_size", 64)
             )
-            print(prompts)
             infos["prompt"] = prompts
         else:
             tokenizer = infos["tokenizer"]
             if '<PROMPT_START>' in tokenizer.symbol_table and \
                 '<PROMPT_END>' in tokenizer.symbol_table:
+                infos['use_prompt_hotword'] = True
                 prompt_start_id = tokenizer.tokens2ids(["<PROMPT_START>"])[0]
                 prompt_end_id = tokenizer.tokens2ids(["<PROMPT_END>"])[0]
                 prompts = [torch.tensor([prompt_start_id, prompt_end_id], 

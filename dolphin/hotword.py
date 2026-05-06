@@ -194,56 +194,74 @@ def two_stage_filtering(
 
     device = ctc_posterior.device
     vocab_size = ctc_posterior.shape[-1]
-    SOC_score = {}
+    T = ctc_posterior.shape[0]
 
-    for t in range(1, ctc_posterior.shape[0]):
-        if t % (filter_window_size // 2) != 0 and t != ctc_posterior.shape[0] - 1:
+    # Precompute valid tokens for each hotword
+    valid_tokens_list = []
+    valid_lengths = []
+    for tokens in context_list:
+        valid = [j for j in tokens if 0 <= j < vocab_size]
+        valid_tokens_list.append(valid)
+        valid_lengths.append(len(valid))
+
+    num_hotwords = len(valid_tokens_list)
+    if num_hotwords == 0:
+        return []
+
+    SOC_score = [float('-inf')] * num_hotwords
+
+    # Pre-build token matrix for vectorized PSC
+    max_token_len = max(valid_lengths) if valid_lengths else 1
+    token_matrix = torch.zeros(num_hotwords, max_token_len, dtype=torch.long, device=device)
+    length_matrix = torch.tensor(valid_lengths, dtype=torch.long, device=device)
+
+    for i, tokens in enumerate(valid_tokens_list):
+        if tokens:
+            token_matrix[i, :len(tokens)] = torch.tensor(tokens, dtype=torch.long, device=device)
+
+    # Iterate time steps
+    for t in range(1, T):
+        if t % (filter_window_size // 2) != 0 and t != T - 1:
             continue
 
+        # PSC: max posterior in window
+        window = ctc_posterior[max(0, t - filter_window_size):t, :]
+        max_posterior, _ = torch.max(window, dim=0, keepdim=False)
+        max_posterior_list = max_posterior.tolist()
+
+        # Compute PSC scores (vectorized)
+        gathered_scores = max_posterior[token_matrix]
+        mask = torch.arange(max_token_len, device=device).unsqueeze(0) < length_matrix.unsqueeze(1)
+        gathered_scores = gathered_scores.masked_fill(~mask, 0)
+        psc_scores = gathered_scores.sum(dim=1).float() / length_matrix.float()
+
+        # Find passing hotwords (use original Python dict logic for correctness)
         PSC_score = {}
-        max_posterior, _ = torch.max(
-            ctc_posterior[max(0, t - filter_window_size):t, :],
-            dim=0,
-            keepdim=False
-        )
-        max_posterior = max_posterior.tolist()
-
-        for i in range(len(context_list)):
-            # Filter out token IDs that are out of vocabulary range
-            valid_tokens = [j for j in context_list[i] if 0 <= j < vocab_size]
-            if not valid_tokens:
+        for i in range(num_hotwords):
+            if valid_lengths[i] == 0:
                 continue
-            score = sum(max_posterior[j] for j in valid_tokens) / len(valid_tokens)
-            PSC_score[i] = max(SOC_score.get(i, -float('inf')), score)
+            score = sum(max_posterior_list[j] for j in valid_tokens_list[i]) / valid_lengths[i]
+            PSC_score[i] = max(SOC_score[i], score)
 
-        PSC_filtered_index = []
-        for i in PSC_score:
-            if PSC_score[i] > filter_threshold:
-                PSC_filtered_index.append(i)
-
+        PSC_filtered_index = [i for i in PSC_score if PSC_score[i] > filter_threshold]
         if len(PSC_filtered_index) == 0:
             continue
 
-        filtered_context_list = []
-        for i in PSC_filtered_index:
-            filtered_context_list.append(context_list[i])
-
+        # SOC computation (original logic, batched for filtered hotwords)
         win_posterior = ctc_posterior[max(0, t - filter_window_size):t, :]
         win_posterior = win_posterior.unsqueeze(0).expand(
-            len(filtered_context_list), -1, -1
+            len(PSC_filtered_index), -1, -1
         )
 
         select_win_posterior = []
-        for i in range(len(filtered_context_list)):
-            # Filter valid tokens for index_select
-            valid_tokens = [j for j in filtered_context_list[i] if 0 <= j < vocab_size]
-            if not valid_tokens:
-                # Use dummy tensor if no valid tokens
+        for i in PSC_filtered_index:
+            valid = valid_tokens_list[i]
+            if not valid:
                 select_win_posterior.append(torch.zeros(1, 1, device=device))
                 continue
             select_win_posterior.append(torch.index_select(
                 win_posterior[0], 1,
-                torch.tensor(valid_tokens, device=device)
+                torch.tensor(valid, device=device)
             ).transpose(0, 1))
 
         select_win_posterior = nn.utils.rnn.pad_sequence(
@@ -254,7 +272,7 @@ def two_stage_filtering(
             (select_win_posterior.shape[0], select_win_posterior.shape[2]),
             -10000.0,
             dtype=torch.float32,
-            device=select_win_posterior.device
+            device=device
         )
         dp[:, 0] = select_win_posterior[:, 0, 0]
 
@@ -269,18 +287,13 @@ def two_stage_filtering(
                 dp[:, 0]
             )
 
-        for i in range(len(filtered_context_list)):
-            SOC_score[PSC_filtered_index[i]] = max(
-                SOC_score.get(PSC_filtered_index[i], -float('inf')),
-                dp[i][len(filtered_context_list[i]) - 1] / len(filtered_context_list[i])
+        for i, orig_idx in enumerate(PSC_filtered_index):
+            SOC_score[orig_idx] = max(
+                SOC_score[orig_idx],
+                dp[i][valid_lengths[orig_idx] - 1] / valid_lengths[orig_idx]
             )
 
-    filtered_context_list = []
-    for i in range(len(context_list)):
-        if SOC_score.get(i, -float('inf')) > filter_threshold:
-            filtered_context_list.append(context_list[i])
-
-    return filtered_context_list
+    return [context_list[i] for i in range(num_hotwords) if SOC_score[i] > filter_threshold]
 
 
 def prepare_hotword_tensor(

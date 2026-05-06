@@ -247,6 +247,7 @@ def ctc_prefix_beam_search(
     return results
 
 
+@torch.no_grad()
 def attention_beam_search(
     model,
     encoder_out: torch.Tensor,
@@ -325,14 +326,16 @@ def attention_beam_search(
         if prompt is not None and len(prompt) > 0:
             # Find max prompt length in batch for padding
             max_prompt_len = max(len(p) for p in prompt)
-
+            # Get unk token id for padding
+            unk_id = tokenizer.tokens2ids(["<unk>"])[0]
             # Build per-sample prompts with padding to max length
             padded_prompts = []
             for b in range(batch_size):
                 p = prompt[b]
+                # prompt_end_token = torch.tensor([p[-1]], device=device, dtype=torch.long)
                 pad_len = max_prompt_len - len(p)
                 if pad_len > 0:
-                    p = torch.cat([p, torch.full((pad_len,), 0, device=device, dtype=torch.long)])
+                    p = torch.cat([p, torch.full((pad_len,), unk_id, device=device, dtype=torch.long)])
                 padded_prompts.append(p)
 
             # Stack and expand to all beam elements: (batch, max_prompt_len) -> (batch*beam, max_prompt_len)
@@ -411,13 +414,18 @@ def attention_beam_search(
     best_hyps = best_hyps[:, 1:]
 
     results = []
+    unk_id = tokenizer.tokens2ids(["<unk>"])[0]
+
     for i in range(batch_size):
         hyp = best_hyps[i]
         hyp = hyp[hyp != model.eos]
+        # Filter out unk tokens used for padding
+        hyp = hyp[hyp != unk_id]
         results.append(DecodeResult(hyp.tolist()))
     return results
 
 
+@torch.no_grad()
 def attention_rescoring(
     model,
     ctc_prefix_results: List[DecodeResult],

@@ -40,8 +40,8 @@ def extract_feats(audios: List[Union[Path, torch.Tensor]], configs: Dict) -> Dic
             mel = torchaudio.compliance.kaldi.fbank(waveform=waveform, **configs["dataset_conf"]["fbank_conf"])
             feats.append(mel)
 
-    feats = pad_sequence(feats, batch_first=True, padding_value=0.0)
     feats_lengths = torch.tensor([feat.size(0) for feat in feats], dtype=torch.long)
+    feats = pad_sequence(feats, batch_first=True, padding_value=0.0)
 
     batch = {
         "feats": feats,
