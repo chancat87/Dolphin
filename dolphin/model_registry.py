@@ -16,16 +16,16 @@ MODELS = {
         "model_id": "DataoceanAI/dolphin-base-zh-streaming",
         "sha256": "62e4c11fe1e0e42bd34e444172c5a05e792c4b5a03750f794fa3206fc0649cd7"
     },
-    "small.zh": {
-        "model_id": "DataoceanAI/dolphin-small-zh",
+    "small.fangyan": {
+        "model_id": "DataoceanAI/dolphin-small-fangyan",
         "sha256": "1cee2b8d2133cabb36567625a832d4033569e27eaf5f98df9be1139ec6068bbb",
     },
-    "small.zh.streaming": {
-        "model_id": "DataoceanAI/dolphin-small-zh-streaming",
+    "small.fangyan.streaming": {
+        "model_id": "DataoceanAI/dolphin-small-fangyan-streaming",
         "sha256": "bba8688ed33841b5f8b4578370be553f4557739c406dc7298f22985f7b061faf",
     },
-    "small.zh.prompt": {
-        "model_id": "DataoceanAI/dolphin-small-zh-prompt",
+    "small.fangyan.prompt": {
+        "model_id": "DataoceanAI/dolphin-small-fangyan-prompt",
         "sha256": "fdd09034024fc3aee16c89f678461791b2eb4ac0ae880da4ea6141e0e32f409b",
     },
 }
