@@ -580,7 +580,7 @@ def transcribe(
     decoding_method: str = "attention_rescoring",
     beam_size: int = 10,
     hotwords: Optional[List[str]] = None,
-    use_deep_biasing: bool = True,
+    use_deep_biasing: bool = False,
     use_two_stage_filter: bool = False,
     use_prompt_hotword: bool = False,
     prompt_filter_threshold: float = -4.0,
