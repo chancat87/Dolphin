@@ -47,12 +47,17 @@ pip install git+https://github.com/SpeechOceanTech/Dolphin.git
 
 There are 4 models in Dolphin, and 2 of them are available now. See details in [paper](https://arxiv.org/abs/2503.20212).
 
-|  Model  | Parameters | Average WER | Publicly Available |
-|:------:|:----------:|:------------------:|:------------------:|
-|  base  |    140 M    |     33.3      |      ✅        |
-| small  |   372 M    |     25.2     |      ✅       |
-| medium |   910 M    |    23.1     |            |
-| large  |   1679 M   |        21.6         |             |
+|  Model  | Parameters |Publicly Available |
+|:------:|:----------:|:------------------:|
+|  base  |    0.1 B    |      ✅        |
+| small  |   0.4 B    |      ✅       |
+| medium |   0.9 B    |            |
+| large  |   1.7B   |             |
+| base.fangyan | 0.1 B | ✅ |
+| base.fangyan.streaming | 0.1 B | ✅ |
+| small.fangyan | 0.4 B | ✅ |
+| small.fangyan.streaming | 0.4 B | ✅ |
+| small.fangyan.prompt | 0.4 B | ✅ |
 
 ### Languages
 

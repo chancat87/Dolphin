@@ -6,15 +6,15 @@ import warnings
 LOGGING_FORMAT="[%(asctime)s] [%(levelname)s] [%(filename)s:%(lineno)d:%(funcName)s] %(message)s"
 logging.basicConfig(level=logging.INFO, format=LOGGING_FORMAT)
 warnings.filterwarnings("ignore", category=FutureWarning)
-# filter framework interanl logs
+# filter framework internal logs
 logging.getLogger("espnet").setLevel(logging.ERROR)
 logging.getLogger("root").setLevel(logging.ERROR)
 logging.getLogger("dolphin").setLevel(logging.INFO)
 
+import math
 import yaml
 import tqdm
 import pydub
-import logging
 import hashlib
 import os.path
 import argparse
@@ -22,69 +22,35 @@ import dataclasses
 import numpy as np
 from pathlib import Path
 from argparse import Namespace
-from os.path import dirname, join, abspath, join
 from distutils.util import strtobool
-from typing import Union, Optional, Tuple, List
+from typing import Union, Optional, Tuple, List, Dict, Any
 
 import torch
+import torch.nn as nn
+import modelscope
+from modelscope.models.audio.funasr.model import GenericFunASR
 try:
     import torch_npu
     torch_npu_is_imported = True
 except:
     torch_npu_is_imported = False
-import modelscope
-from modelscope.models.audio.funasr.model import GenericFunASR
 
-from .audio import load_audio, convert_audio
-from .model import DolphinSpeech2Text, TranscribeResult, TranscribeSegmentResult
-from .languages import LANGUAGE_REGION_CODES, LANGUAGE_CODES
-from .constants import SPEECH_LENGTH
+from dolphin.audio import convert_audio
+# from dolphin.model import DolphinSpeech2Text, TranscribeResult, TranscribeSegmentResult
+from dolphin.processor import extract_feats
+from dolphin.model import (ASRModel, init_speech_model,
+                           TranscribeResult, TranscribeSegmentResult)
+from dolphin.languages import LANGUAGE_REGION_CODES, LANGUAGE_CODES
+from dolphin.constants import SPEECH_LENGTH
+from dolphin.model_registry import MODELS
+from dolphin.tokenizer import init_tokenizer, BaseTokenizer, BpeTokenizer
+from dolphin.hotword import HotwordEncoder, prepare_hotword_tensor, two_stage_filtering
+
 
 logger = logging.getLogger("dolphin")
 
 VAD_MODEL = "iic/speech_fsmn_vad_zh-cn-16k-common-pytorch"
 
-
-MODELS = {
-    "base": {
-        "model_id": "DataoceanAI/dolphin-base",
-        "download_url": "http://so-algorithm-prod.oss-cn-beijing.aliyuncs.com/models/dolphin/base.pt",
-        "sha256": "688f0cdb26da2684a4eec200a432091920287585e8e332507cbe9c1ab6d77401",
-        "config": {
-            "encoder": {
-                "output_size": 512,
-                "attention_heads": 8,
-                "cgmlp_linear_units": 2048,
-                "num_blocks": 6,
-                "linear_units": 2048,
-            },
-            "decoder": {
-                "attention_heads": 8,
-                "linear_units": 2048,
-                "num_blocks": 6,
-            }
-        }
-    },
-    "small": {
-        "model_id": "DataoceanAI/dolphin-small",
-        "download_url": "http://so-algorithm-prod.oss-cn-beijing.aliyuncs.com/models/dolphin/small.pt",
-        "sha256": "4a0c6c636657121ec2a2b656e97e45b29a8b29c92fa3998006e02ab146d8ac51",
-        "config": {
-            "encoder": {
-                "output_size": 768,
-                "attention_heads": 12,
-                "cgmlp_linear_units": 3072,
-                "num_blocks": 12,
-                "linear_units": 1536,
-            },
-            "decoder": {
-                "attention_heads": 12,
-                "linear_units": 3072,
-                "num_blocks": 12,
-            }
-        }
-    },
-}
 
 
 def str2bool(value: str) -> bool:
@@ -96,16 +62,23 @@ def parser_args() -> Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("audio", type=str, help="audio file path")
     parser.add_argument("--model", type=str, default="small", help="model name (default: small)")
-    parser.add_argument("--model_dir", type=Path, default=None, help="model checkpoint download diretory")
+    parser.add_argument("--model_dir", type=Path, default=None, help="model checkpoint download directory")
     parser.add_argument("--lang_sym", type=str, default=None, help="language symbol (e.g. zh)")
-    parser.add_argument("--region_sym", type=str, default=None, help="regiion symbol (e.g. CN)")
+    parser.add_argument("--region_sym", type=str, default=None, help="region symbol (e.g. CN)")
     parser.add_argument("--device", type=str, default=None, help="torch device (default: None)")
-    parser.add_argument("--normalize_length", type=str2bool, default=False, help="whether to normalize length (default: false)")
-    parser.add_argument("--padding_speech", type=str2bool, default=False, help="whether padding speech to 30 seconds (default: false)")
     parser.add_argument("--predict_time", type=str2bool, default=True, help="whether predict timestamp (default: true)")
-    parser.add_argument("--beam_size", type=int, default=5, help="number of beams in beam search (default: 5)")
-    parser.add_argument("--maxlenratio", type=float, default=0.0, help="Input length ratio to obtain max output length (default: 0.0)")
-    parser.add_argument("--disable_model_hash_check", action="store_true", help="Disable model checkpoint hash check")
+    parser.add_argument("--beam_size", type=int, default=10, help="number of beams in beam search (default: 10)")
+    parser.add_argument("--decoding_method", type=str, default="attention_rescoring",
+                        help="decoding methods, supports: attention, attention_rescoring (default: attention_rescoring)")
+    parser.add_argument("--maxlenratio", type=float, default=0.0, help="deprecated, Input length ratio to obtain max output length (default: 0.0)")
+    parser.add_argument("--padding_speech", type=str2bool, default=False, help="deprecated, whether padding speech to 30 seconds (default: false)")
+    parser.add_argument("--normalize_length", type=str2bool, default=False, help="deprecated, whether to normalize length (default: false)")
+    parser.add_argument("--hotword_str", type=str, default=None, help="comma-separated hotwords (e.g. '张三,李四')")
+    parser.add_argument("--hotword_list_path", type=Path, default=None, help="path to hotword list file")
+    parser.add_argument("--use_deep_biasing", type=str2bool, default=False, help="use deep biasing for hotwords (default: false)")
+    parser.add_argument("--use_two_stage_filter", type=str2bool, default=False, help="use two-stage filtering for hotwords (default: false)")
+    parser.add_argument("--use_prompt_hotword", type=str2bool, default=False, help="use prompt-based hotword (default: false)")
+    parser.add_argument("--prompt_filter_threshold", type=float, default=-2.0, help="filter threshold for prompt hotwords (default: -2.0)")
 
     args = parser.parse_args()
     return args
@@ -136,99 +109,172 @@ def seconds_to_hms(total_seconds: int):
         return f"{minutes:02d}:{seconds:02d}"
 
 
+def convert_v1_state_dict(state_dict: Dict[str, Any]) -> Dict[str, Any]:
+    def generate_pe(d_model: int):
+        pe = torch.zeros(5000, d_model)
+        position = torch.arange(0, 5000,dtype=torch.float32).unsqueeze(1)
+        div_term = torch.exp(torch.arange(0, d_model, 2, dtype=torch.float32) * -(math.log(10000.0) / d_model))
+        pe[:, 0::2] = torch.sin(position * div_term)
+        pe[:, 1::2] = torch.cos(position * div_term)
+        pe = pe.unsqueeze(0)
+
+        return pe
+
+    d_model = state_dict["decoder.output_layer.weight"].size(-1)
+    pe = generate_pe(d_model)
+
+    state_dict["encoder.global_cmvn.mean"] = state_dict["normalize.mean"]
+    state_dict["encoder.global_cmvn.std"] = state_dict["normalize.std"]
+    state_dict["decoder.embed.1.pe"] = pe
+
+    del state_dict["normalize.mean"]
+    del state_dict["normalize.std"]
+    del state_dict["frontend.logmel.melmat"]
+
+    return state_dict
+
+
 def load_model(
     model_name: str,
     model_dir: Union[Path, str],
     device: Optional[Union[str, torch.device]] = None,
-    **kwargs
-) -> DolphinSpeech2Text:
+) -> ASRModel:
     """
-    Load DolphinSpeech2Text model.
+    Load model.
 
     Args:
         model_name: model name (e.g. small)
         model_dir: model download directory
-        device: the pytorch device
+        device: the accelerator device
 
     Returns:
-        DolphinSpeech2Text instance
+        ASRModel instance
     """
     if device is None:
         device = detect_device()
         logger.info(f"auto detect device: {device}")
 
-    model_config = kwargs.get("model_config") or MODELS[model_name]["config"]
-    train_cfg_file = join(dirname(abspath(__file__)), "assets/config.yaml")
-    with open(train_cfg_file, "r", encoding="utf-8") as f:
-        train_cfg = yaml.safe_load(f)
-        train_cfg["encoder_conf"].update(**model_config["encoder"])
-        train_cfg["decoder_conf"].update(**model_config["decoder"])
-
-    if isinstance(model_dir, str):
+    if not isinstance(model_dir, Path):
         model_dir = Path(model_dir)
 
-    model_file = model_dir / f"{model_name}.pt"
     download_model = True
-    disable_model_hash_check = kwargs.get("disable_model_hash_check", False)
-    if model_file.exists() and not disable_model_hash_check:
-        with open(model_file, "rb") as f:
+    model_ckpt_file = model_dir / f"{model_name}.pt"
+    if model_ckpt_file.exists():
+        with open(model_ckpt_file, "rb") as f:
             model_bytes = f.read()
+
         if hashlib.sha256(model_bytes).hexdigest() == MODELS[model_name]["sha256"]:
             download_model = False
         else:
-            model_file.unlink(missing_ok=True)
-            logger.warning("model SHA256 chechsum mismatch, redownload model...")
+            logger.warning("model SHA256 checksum mismatch, redownload model...")
+    else:
+        logger.info(f"model {model_ckpt_file} not exists, download...")
 
-    if download_model and not disable_model_hash_check:
-        # Download model
-        model_dir.mkdir(exist_ok=True)
-        _download_from_modelscope(
+    if download_model:
+        model_dir.mkdir(parents=True, exist_ok=True)
+        modelscope.snapshot_download(
             model_id=MODELS[model_name]["model_id"],
             local_dir=model_dir,
-            allow_file_pattern=f"{model_name}.pt",
+            allow_file_pattern=None,
+            repo_type="model",
         )
 
-    model = DolphinSpeech2Text(
-        s2t_train_config=train_cfg,
-        s2t_model_file=model_file,
-        device=device,
-        task_sym=kwargs.get("task_sym", "<asr>"),
-        predict_time=kwargs.get("predict_time", True),
-        **kwargs,
-    )
+    assert (model_dir / "train.yaml").exists(), "model config not found, please redownload model!"
+    with open(model_dir / "train.yaml") as f:
+        configs = yaml.load(f, Loader=yaml.Loader)
+        if configs["cmvn"] == "global_mvn":
+            configs["cmvn_conf"]["cmvn_file"] = str(model_dir / "feats_stats.npz")
+        else:
+            configs["cmvn_conf"]["cmvn_file"] = str(model_dir / "global_cmvn")
+
+
+        configs["tokenizer_conf"]["symbol_table_path"] = str(model_dir / "units.txt")
+        if "bpe_path" in configs["tokenizer_conf"]:
+            configs["tokenizer_conf"]["bpe_path"] = str(model_dir / configs["tokenizer_conf"]["bpe_path"])
+
+    model = init_speech_model(configs)
+    state_dict = torch.load(model_dir / f"{model_name}.pt", map_location="cpu")
+    state_dict = convert_v1_state_dict(state_dict) if "normalize.mean" in state_dict else state_dict
+
+    # Handle context_module (hotword encoder) loading
+    context_module_state = {}
+    non_context_state = {}
+    for k, v in state_dict.items():
+        if k.startswith("context_module."):
+            context_module_state[k.replace("context_module.", "")] = v
+        else:
+            non_context_state[k] = v
+
+    model.load_state_dict(non_context_state)
+
+    # Initialize and load context_module if present
+    if context_module_state and configs.get("context_module") == "cppn":
+        ctx_conf = configs.get("context_module_conf", {})
+        encoder_conf = configs.get("encoder_conf", {})
+        encoder_d_model = encoder_conf.get("output_size", 768)
+        ctx_embedding_size = ctx_conf.get("embedding_size", encoder_d_model)
+        hotword_encoder = HotwordEncoder(
+            vocab_size=model.vocab_size,
+            embedding_size=ctx_embedding_size,
+            encoder_layers=ctx_conf.get("encoder_layers", 2),
+            attention_heads=ctx_conf.get("attention_heads", 4),
+            dropout_rate=ctx_conf.get("dropout_rate", 0.0)
+        )
+        # Filter out keys that aren't in HotwordEncoder (context_decoder is for training only)
+        hotword_keys = set(hotword_encoder.state_dict().keys())
+        filtered_context_state = {
+            k: v for k, v in context_module_state.items()
+            if k in hotword_keys
+        }
+        hotword_encoder.load_state_dict(filtered_context_state, strict=False)
+        model.context_module = hotword_encoder
+        logger.info("Loaded context_module (hotword encoder) from model")
+
+    model.model_configs = configs
+    model = model.to(device)
+    model.device = device
+    model.eval()
+
+    # Compatible with old version model framework
+    if "layer_norm_eps" in model.model_configs:
+        layer_norm_eps = float(model.model_configs["layer_norm_eps"])
+        for m in model.modules():
+            if isinstance(m, nn.LayerNorm):
+                m.eps = layer_norm_eps
+
     return model
-
-
-def _download_from_modelscope(model_id: str, local_dir: str, allow_file_pattern: str):
-    modelscope.snapshot_download(
-        model_id=model_id,
-        local_dir=local_dir,
-        allow_file_pattern=allow_file_pattern,
-        repo_type="model",
-    )
 
 
 def validate_lang_region(lang_sym: str, region_sym: str):
 
     if all([lang_sym, region_sym]):
         if f"{lang_sym}-{region_sym}" not in LANGUAGE_REGION_CODES:
-            raise Exception("Unsupport language or region!")
-    elif lang_sym and region_sym is None:
-        if lang_sym not in LANGUAGE_CODES:
-            raise Exception("Unsupport language!")
+            raise Exception("Unsupported language or region!")
+    elif any([lang_sym, region_sym]):
+        if lang_sym is not None and region_sym is None:
+            assert lang_sym in LANGUAGE_CODES, "Unsupported language!"
+        elif lang_sym is None and region_sym is not None:
+            assert False, "If you specify a dialect, you must configure the language!"
 
     return True
 
 
 def transcribe_long(
-        model: DolphinSpeech2Text,
-        audio: str,
-        lang_sym: str = None,
-        region_sym: str = None,
-        predict_time: bool = True,
-        padding_speech: bool = False,
-        **kwargs,
-    ) -> List[TranscribeSegmentResult]:
+    model: ASRModel,
+    audio: str,
+    lang_sym: str = None,
+    region_sym: str = None,
+    predict_time: bool = True,
+    padding_speech: bool = False,
+    decoding_method: str = "attention_rescoring",
+    beam_size: int = 10,
+    hotwords: Optional[List[str]] = None,
+    use_deep_biasing: bool = False,
+    use_two_stage_filter: bool = False,
+    use_prompt_hotword: bool = False,
+    prompt_filter_threshold: float = -2.0,
+    **kwargs,
+) -> List[TranscribeSegmentResult]:
     """
     Transcribe audio to text.
 
@@ -236,9 +282,15 @@ def transcribe_long(
         model: model instance
         audio: audio path
         lang_sym: language symbol (e.g. zh)
-        region_sym: regiion symbol (e.g. CN)
+        region_sym: region symbol (e.g. CN)
         predict_time: whether predict timestamp (default: true)
-        padding_speech: whether padding speech to 30 seconds (default: false)
+        padding_speech: deprecated, whether padding speech to 30 seconds (default: false)
+        decoding_method: decoding methods, supports: attention, attention_rescoring (default: attention_rescoring)
+        hotwords: list of hotword strings (default: None)
+        use_deep_biasing: whether use deep biasing for hotwords (default: false)
+        use_two_stage_filter: whether use two-stage filtering (default: false)
+        use_prompt_hotword: whether use prompt-based hotword (default: false)
+        prompt_filter_threshold: filter threshold for prompt hotwords (default: -2.0)
 
     Returns:
         List[TranscribeSegmentResult]
@@ -249,11 +301,22 @@ def transcribe_long(
 
     logging.info("download vad model")
     vad_model_dir = Path(os.path.expanduser("~/.cache/dolphin/speech_fsmn_vad"))
-    vad_model_dir.mkdir(exist_ok=True)
-    _download_from_modelscope(VAD_MODEL, vad_model_dir, None)
+    vad_model_dir.mkdir(parents=True, exist_ok=True)
+    if not (vad_model_dir / "model.pt").exists():
+        modelscope.snapshot_download(
+            model_id=VAD_MODEL,
+            local_dir=vad_model_dir,
+            allow_file_pattern=None,
+            repo_type="model",
+        )
 
     logger.info("loading vad model")
-    vad_model = GenericFunASR(vad_model_dir, max_single_segment_time=SPEECH_LENGTH*1000, device="cpu")
+    vad_model = GenericFunASR(
+        vad_model_dir,
+        max_single_segment_time=SPEECH_LENGTH*1000,
+        device="cpu",
+        disable_update=True,
+    )
 
     # convert audio to sample rate 16k Mono channel audio
     tmp_audio = f"{audio}.wav"
@@ -263,17 +326,80 @@ def transcribe_long(
     segments = vad_model(input=tmp_audio, disable_pbar=True)[0]["value"]
 
     logger.info("decoding...")
+    tokenizer = init_tokenizer(model.model_configs)
+
+    # Process hotwords if provided
+    hotword_token_ids = None
+    hotword_encoder = None
+    if hotwords:
+        # Convert hotword strings to token ID sequences
+        hotword_token_ids = []
+        for hw in hotwords:
+            # For hotwords, always use char-level splitting
+            # BPE doesn't work well for Chinese hotwords
+            tokens = list(hw)
+            ids = tokenizer.tokens2ids(tokens)
+            if ids:
+                hotword_token_ids.append(ids)
+
+        logger.info(f"Using hotwords with {len(hotword_token_ids)} hotwords")
+
     audio_segment = pydub.AudioSegment.from_wav(tmp_audio)
     for seg in segments:
         s, e = seg
-        raw_data = audio_segment[s:e].raw_data
-        waveform = np.frombuffer(raw_data, np.int16).flatten().astype(np.float32) / 32768.0
-        result = model(
-            speech=waveform,
-            lang_sym=lang_sym,
-            region_sym=region_sym,
-            predict_time=predict_time,
-            padding_speech=padding_speech,
+        raw_data = audio_segment[s:e].set_channels(1).raw_data
+        waveform: torch.Tensor = torch.frombuffer(raw_data, dtype=torch.int16).to(torch.float32) / 32768.0
+        batch = extract_feats([waveform.unsqueeze(0)], model.model_configs)
+        batch["feats"] = batch["feats"].to(model.device)
+        batch["feats_lengths"] = batch["feats_lengths"].to(model.device)
+
+        lang_tokens = [f"<{lang_sym}>"] if lang_sym is not None else None
+        region_tokens = [f"<{region_sym}>"] if region_sym is not None else None
+        need_timestamp = True if predict_time and model.model_configs.get("support_timestamp", False) else False
+
+        decoding_infos = {
+            "tokenizer": tokenizer,
+            "langs": lang_tokens,
+            "regions": region_tokens,
+            "need_timestamp": need_timestamp
+        }
+
+        if hotword_token_ids and hotword_encoder:
+            decoding_infos["hotwords"] = hotword_token_ids
+            decoding_infos["hotword_encoder"] = hotword_encoder
+            decoding_infos["use_deep_biasing"] = True
+            decoding_infos["use_two_stage_filter"] = use_two_stage_filter
+
+        if use_prompt_hotword and hotword_token_ids:
+            decoding_infos["hotwords"] = hotword_token_ids
+            decoding_infos["use_prompt_hotword"] = True
+            decoding_infos["filter_threshold"] = prompt_filter_threshold
+            decoding_infos["use_two_stage_filter"] = use_two_stage_filter
+            decoding_infos["tokenizer"] = tokenizer
+            if decoding_method != 'attention':
+                logger.warning('[decoding_method -> attention] is much more better, maybe considering change it with --decoding_method attention')
+
+        ret = model.decode(
+            methods=[decoding_method],
+            speech=batch["feats"],
+            speech_lengths=batch["feats_lengths"],
+            beam_size=beam_size,
+            infos=decoding_infos
+        )
+        tokens = ret[decoding_method][0].tokens
+
+        if use_prompt_hotword:
+            hotwords_text, tokens = _filter_prompt_tokens(tokens, tokenizer)
+            logger.info(f"Detected hotwords: {hotwords_text}")
+            
+        nonspecial_tokens = _filter_nonspecial_tokens(tokens, tokenizer)
+        lang = tokenizer.ids2tokens([tokens[0]])[0][1:-1]
+        region = tokenizer.ids2tokens([tokens[1]])[0][1:-1]
+        result = TranscribeResult(
+            text=tokenizer.detokenize(tokens)[0],
+            text_nospecial=tokenizer.detokenize(nonspecial_tokens)[0],
+            language=lang,
+            region=region,
         )
 
         st = seconds_to_hms(s/1000)
@@ -293,15 +419,173 @@ def transcribe_long(
     return results
 
 
+def _parse_hotwords(
+    hotword_str: Optional[str] = None,
+    hotword_list_path: Optional[Path] = None,
+) -> Optional[List[str]]:
+    """Parse hotwords from string or file.
+
+    Args:
+        hotword_str: comma-separated hotwords (e.g. '张三,李四')
+        hotword_list_path: path to hotword list file
+
+    Returns:
+        List of hotword strings, or None if no hotwords provided
+    """
+    if hotword_str is None and hotword_list_path is None:
+        return None
+
+    hotwords = []
+    if hotword_str:
+        hotwords.extend(h.strip() for h in hotword_str.split(",") if h.strip())
+
+    if hotword_list_path:
+        if hotword_list_path.exists():
+            with open(hotword_list_path, "r", encoding="utf-8") as f:
+                hotwords.extend(line.strip() for line in f if line.strip())
+        else:
+            logger.warning(f"hotword list file not found: {hotword_list_path}")
+
+    return hotwords if hotwords else None
+
+
+def _prepare_prompt_hotwords(
+    batch_size: int,
+    ctc_probs_list: List[torch.Tensor],
+    hotword_token_ids: List[List[int]],
+    tokenizer: BaseTokenizer,
+    use_two_stage_filter: bool = True,
+    filter_threshold: float = -4.0,
+    filter_window_size: int = 64,
+    max_hotwords_without_filter: int = 10
+) -> List[torch.Tensor]:
+    """Prepare per-sample prompt tensors from hotwords based on CTC posterior filtering.
+
+    For each sample in the batch, applies two-stage filtering to select relevant hotwords,
+    then prepends [PROMPT_START, hotwords..., PROMPT_END] to create the prompt.
+
+    Args:
+        batch_size: Number of samples in the batch.
+        ctc_probs_list: List of CTC log probability tensors, one per sample (T, vocab_size).
+        hotword_token_ids: All hotword token ID sequences.
+        tokenizer: Tokenizer instance for getting PROMPT_START/PROMPT_END token IDs.
+        use_two_stage_filter: Whether to apply two-stage filtering (default: False).
+        filter_threshold: Threshold for two-stage filtering.
+        filter_window_size: Window size for PSC/SOC calculation.
+        max_hotwords_without_filter: Maximum hotwords to use when filtering is disabled (default: 10).
+
+    Returns:
+        List of prompt tensors, one per sample. Each tensor contains token IDs.
+    """
+    device = ctc_probs_list[0].device if ctc_probs_list else torch.device('cpu')
+    prompt_start_id = tokenizer.tokens2ids(["<PROMPT_START>"])[0]
+    prompt_end_id = tokenizer.tokens2ids(["<PROMPT_END>"])[0]
+
+    prompts = []
+    for b in range(batch_size):
+        ctc_posterior = ctc_probs_list[b]
+        if ctc_posterior.dim() == 3:
+            ctc_posterior = ctc_posterior.squeeze(0)
+
+        # Apply two-stage filtering for this sample
+        if use_two_stage_filter:
+            filtered = two_stage_filtering(
+                hotword_token_ids,
+                ctc_posterior,
+                filter_threshold=filter_threshold,
+                filter_window_size=filter_window_size
+            )
+        else:
+            # Without filtering, use very limited hotwords to avoid OOM
+            # WARNING: This is not recommended for production use
+            logger.warning(
+                f"Prompt hotword without two-stage filtering may cause OOM or poor results. "
+                f"Using only first {max_hotwords_without_filter} hotwords. "
+                f"Recommend using use_two_stage_filter=True."
+            )
+            filtered = hotword_token_ids[:max_hotwords_without_filter]
+
+        # Build prompt: [PROMPT_START, hotword_ids..., PROMPT_END]
+        prompt_tokens = [prompt_start_id]
+        for hw_ids in filtered:
+            prompt_tokens.extend(hw_ids)
+        prompt_tokens.append(prompt_end_id)
+
+        prompts.append(torch.tensor(prompt_tokens, dtype=torch.long, device=device))
+
+    return prompts
+
+
+def _filter_nonspecial_tokens(tokens: List[int], tokenizer: BaseTokenizer) -> List[int]:
+    """
+    Filter out special tokens from the token list.
+
+    Args:
+        tokens: list of token ids
+        tokenizer: tokenizer instance
+
+    Returns:
+        list of non-special token ids
+    """
+    last_time_id = tokenizer.tokens2ids(["<30.00>"])[0]
+    nonspecial_tokens = list(filter(lambda x: x > last_time_id , tokens))
+
+    return nonspecial_tokens
+
+def _filter_prompt_tokens(tokens: List[int], tokenizer: BaseTokenizer) -> Tuple[str, List[int]]:
+    """
+    Filter out prompt tokens from the token list and get the detected hotwords text.
+
+    Args:
+        tokens: list of token ids
+        tokenizer: tokenizer instance
+
+    Returns:
+        detected hotwords text;
+        list of non-special token ids
+    """
+    prompt_start_id = tokenizer.tokens2ids(["<PROMPT_START>"])[0]
+    prompt_end_id = tokenizer.tokens2ids(["<PROMPT_END>"])[0]
+    prompt_start_pos, prompt_end_pos = tokens.index(prompt_start_id), tokens.index(prompt_end_id)
+    hotword_tokens = tokens[prompt_start_pos+1:prompt_end_pos]
+    hotwords_text = tokenizer.detokenize(hotword_tokens)[0]
+    tokens = tokens[prompt_end_pos+1:]
+
+    return hotwords_text, tokens
+
+def detect_language(model: ASRModel, audio: str) -> Tuple[str, str]:
+    """
+    Detect language and dialect.
+    """
+    batch = extract_feats([audio], model.model_configs)
+    batch["feats"] = batch["feats"].to(model.device)
+    batch["feats_lengths"] = batch["feats_lengths"].to(model.device)
+
+    ret = model.detect_language(batch["feats"], batch["feats_lengths"])
+    tokenizer = init_tokenizer(model.model_configs)
+    lang, dialect = tokenizer.ids2tokens(ret.tolist()[0])
+    lang = lang[1:-1]
+    dialect = dialect[1:-1]
+
+    return (lang, dialect)
+
+
 def transcribe(
-        model: DolphinSpeech2Text,
-        audio: str,
-        lang_sym: str = None,
-        region_sym: str = None,
-        predict_time: bool = True,
-        padding_speech: bool = False,
-        **kwargs,
-    ) -> TranscribeResult:
+    model: ASRModel,
+    audio: str,
+    lang_sym: str = None,
+    region_sym: str = None,
+    predict_time: bool = False,
+    padding_speech: bool = False,
+    decoding_method: str = "attention_rescoring",
+    beam_size: int = 10,
+    hotwords: Optional[List[str]] = None,
+    use_deep_biasing: bool = False,
+    use_two_stage_filter: bool = False,
+    use_prompt_hotword: bool = False,
+    prompt_filter_threshold: float = -4.0,
+    **kwargs,
+) -> TranscribeResult:
     """
     Transcribe audio to text.
 
@@ -309,26 +593,113 @@ def transcribe(
         model: model instance
         audio: audio path
         lang_sym: language symbol (e.g. zh)
-        region_sym: regiion symbol (e.g. CN)
-        predict_time: whether predict timestamp (default: true)
-        padding_speech: whether padding speech to 30 seconds (default: false)
+        region_sym: region symbol (e.g. CN)
+        predict_time: whether predict timestamp (default: false)
+        padding_speech: deprecated, whether padding speech to 30 seconds (default: false)
+        decoding_method: decoding methods, supports: attention, attention_rescoring (default: attention_rescoring)
+        hotwords: list of hotword strings (default: None)
+        use_deep_biasing: whether use deep biasing for hotwords (default: true)
+        use_two_stage_filter: whether use two-stage filtering (default: false)
+        use_prompt_hotword: whether use prompt-based hotword (default: false)
+        prompt_filter_threshold: filter threshold for prompt hotwords (default: -4.0)
 
     Returns:
         TranscribeResult
     """
-    waveform = load_audio(audio)
     validate_lang_region(lang_sym, region_sym)
 
     logger.info("decoding...")
-    result = model(
-        speech=waveform,
-        lang_sym=lang_sym,
-        region_sym=region_sym,
-        predict_time=predict_time,
-        padding_speech=padding_speech
+    batch = extract_feats([audio], model.model_configs)
+    batch["feats"] = batch["feats"].to(model.device)
+    batch["feats_lengths"] = batch["feats_lengths"].to(model.device)
+
+    lang_tokens = [f"<{lang_sym}>"] if lang_sym is not None else None
+    region_tokens = [f"<{region_sym}>"] if region_sym is not None else None
+
+    tokenizer = init_tokenizer(model.model_configs)
+    need_timestamp = True if predict_time and model.model_configs.get("support_timestamp", False) else False
+    decoding_infos = {
+        "tokenizer": tokenizer,
+        "langs": lang_tokens,
+        "regions": region_tokens,
+        "need_timestamp": need_timestamp
+    }
+
+    # Process hotwords if provided
+    if hotwords and use_deep_biasing:
+        # Convert hotword strings to token ID sequences
+        hotword_token_ids = []
+        for hw in hotwords:
+            # For hotwords, always use char-level splitting
+            # BPE doesn't work well for Chinese hotwords
+            tokens = list(hw)
+            ids = tokenizer.tokens2ids(tokens)
+            if ids:
+                hotword_token_ids.append(ids)
+
+        if hotword_token_ids:
+            # Initialize HotwordEncoder
+            encoder_conf = model.model_configs.get("encoder_conf", {})
+            encoder_d_model = encoder_conf.get("output_size", 256)
+            hotword_encoder = HotwordEncoder(
+                vocab_size=tokenizer.vocab_size(),
+                embedding_size=encoder_d_model,
+                encoder_layers=2,
+                attention_heads=4,
+                dropout_rate=0.0
+            ).to(model.device)
+
+            decoding_infos["hotwords"] = hotword_token_ids
+            decoding_infos["hotword_encoder"] = hotword_encoder
+            decoding_infos["use_deep_biasing"] = True
+            decoding_infos["use_two_stage_filter"] = use_two_stage_filter
+            logger.info(f"Using deep biasing with {len(hotword_token_ids)} hotwords")
+
+    # Also handle prompt-based hotword if requested
+    if hotwords and use_prompt_hotword:
+        # Convert hotword strings to token ID sequences
+        hotword_token_ids = []
+        for hw in hotwords:
+            tokens = list(hw)
+            ids = tokenizer.tokens2ids(tokens)
+            if ids:
+                hotword_token_ids.append(ids)
+
+        if hotword_token_ids:
+            decoding_infos["hotwords"] = hotword_token_ids
+            decoding_infos["use_prompt_hotword"] = True
+            decoding_infos["filter_threshold"] = prompt_filter_threshold
+            decoding_infos["use_two_stage_filter"] = use_two_stage_filter
+            logger.info(f"Using prompt hotword with {len(hotword_token_ids)} hotwords")
+            if decoding_method != 'attention':
+                logger.warning('[decoding_method -> attention] is much more better, maybe considering change it with --decoding_method attention')
+
+
+    ret = model.decode(
+        methods=[decoding_method],
+        speech=batch["feats"],
+        speech_lengths=batch["feats_lengths"],
+        beam_size=beam_size,
+        infos=decoding_infos
     )
 
-    logger.info(f"decode result, rtf: {result.rtf}, language: {result.language}, region: {result.region}, text: {result.text}")
+    tokens = ret[decoding_method][0].tokens
+    if use_prompt_hotword or "<PROMPT_START>" in tokenizer.symbol_table:
+        hotwords_text, tokens = _filter_prompt_tokens(tokens, tokenizer)
+        if hotwords_text:
+            logger.info(f"Detected hotwords: {hotwords_text}")
+    nonspecial_tokens = _filter_nonspecial_tokens(tokens, tokenizer)
+    lang = tokenizer.ids2tokens([tokens[0]])[0][1:-1]
+    region = tokenizer.ids2tokens([tokens[1]])[0][1:-1]
+
+    result = TranscribeResult(
+        text=tokenizer.detokenize(tokens)[0],
+        text_nospecial=tokenizer.detokenize(nonspecial_tokens)[0],
+        language=lang,
+        region=region,
+    )
+
+    logger.info(f"decode result, language: {result.language}, region: {result.region}, text: {result.text_nospecial}")
     return result
 
 
@@ -337,22 +708,19 @@ def cli():
 
     model = args.model
     if model not in MODELS:
-        logging.error(f"Unknown model {model}, Dolphin open source base, small model, please config the correct model.")
+        logging.error(f"Unknown model {model}, Dolphin open source {tuple(MODELS.keys())} model, please config the correct model.")
         return
 
-    model_dir = args.model_dir if args.model_dir else os.path.expanduser("~/.cache/dolphin")
+    model_dir = args.model_dir if args.model_dir else os.path.expanduser(f"~/.cache/dolphin/{model}")
     model_dir = Path(model_dir)
 
-    logger.info("loading asr model")
     device = args.device if args.device else detect_device()
-    model_kwargs = {
-        "device": device,
-        "normalize_length": args.normalize_length,
-        "beam_size": args.beam_size,
-        "maxlenratio": args.maxlenratio,
-        "disable_model_hash_check": args.disable_model_hash_check,
-    }
-    model_instance = load_model(model, model_dir, **model_kwargs)
+    logger.info(f"loading asr model, device: {device}")
+    model_instance = load_model(model, model_dir, device)
+    logger.info(f"model loaded successfuly, device: {device}")
+
+    # Parse hotwords
+    hotwords = _parse_hotwords(args.hotword_str, args.hotword_list_path)
 
     audio_duration = pydub.AudioSegment.from_file(args.audio).duration_seconds
     transcribe_fn = transcribe_long if audio_duration > SPEECH_LENGTH else transcribe
@@ -363,6 +731,13 @@ def cli():
         "region_sym": args.region_sym,
         "predict_time": args.predict_time,
         "padding_speech": args.padding_speech,
+        "decoding_method": args.decoding_method,
+        "beam_size": args.beam_size,
+        "hotwords": hotwords,
+        "use_deep_biasing": args.use_deep_biasing,
+        "use_two_stage_filter": args.use_two_stage_filter,
+        "use_prompt_hotword": args.use_prompt_hotword,
+        "prompt_filter_threshold": args.prompt_filter_threshold,
     }
     transcribe_fn(**transcribe_params)
 
