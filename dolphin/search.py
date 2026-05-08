@@ -247,6 +247,7 @@ def ctc_prefix_beam_search(
     return results
 
 
+@torch.no_grad()
 def attention_beam_search(
     model,
     encoder_out: torch.Tensor,
@@ -317,6 +318,36 @@ def attention_beam_search(
         encoder_mask = mask_to_bias(encoder_mask, encoder_out.dtype)
     if hasattr(model, 'decode_maxlen'):
         maxlen = model.decode_maxlen
+
+    # Handle prompt-based hotword - ONLY if explicitly set in infos
+    # Check for use_prompt_hotword flag to avoid processing stale prompts
+    if infos.get("use_prompt_hotword", False) and "prompt" in infos:
+        prompt = infos["prompt"]
+        if prompt is not None and len(prompt) > 0:
+            # Find max prompt length in batch for padding
+            max_prompt_len = max(len(p) for p in prompt)
+            # Get unk token id for padding
+            unk_id = tokenizer.tokens2ids(["<unk>"])[0]
+            # Build per-sample prompts with padding to max length
+            padded_prompts = []
+            for b in range(batch_size):
+                p = prompt[b]
+                # prompt_end_token = torch.tensor([p[-1]], device=device, dtype=torch.long)
+                pad_len = max_prompt_len - len(p)
+                if pad_len > 0:
+                    p = torch.cat([p, torch.full((pad_len,), unk_id, device=device, dtype=torch.long)])
+                padded_prompts.append(p)
+
+            # Stack and expand to all beam elements: (batch, max_prompt_len) -> (batch*beam, max_prompt_len)
+            prompt_tensor = torch.stack(padded_prompts)  # (batch, max_prompt_len)
+            prompt_expanded = prompt_tensor.unsqueeze(2).expand(batch_size, max_prompt_len, beam_size)
+            prompt_expanded = prompt_expanded.permute(0, 2, 1).contiguous().view(running_size, max_prompt_len)
+
+            # Insert prompt after sos: hyps = [sos] + [prompt] + [rest]
+            # hyps initially has shape (running_size, prefix_len) where prefix_len includes sos + lang + region + task + time
+            hyps = torch.cat([hyps[:, :1], prompt_expanded, hyps[:, 1:]], dim=1).to(device)
+
+    prefix_len = hyps.size(1)
     # 2. Decoder forward step by step
     for i in range(prefix_len, maxlen + 1):
         # Stop if all batch and all beam produce eos
@@ -383,13 +414,18 @@ def attention_beam_search(
     best_hyps = best_hyps[:, 1:]
 
     results = []
+    unk_id = tokenizer.tokens2ids(["<unk>"])[0]
+
     for i in range(batch_size):
         hyp = best_hyps[i]
         hyp = hyp[hyp != model.eos]
+        # Filter out unk tokens used for padding
+        hyp = hyp[hyp != unk_id]
         results.append(DecodeResult(hyp.tolist()))
     return results
 
 
+@torch.no_grad()
 def attention_rescoring(
     model,
     ctc_prefix_results: List[DecodeResult],
@@ -446,13 +482,22 @@ def attention_rescoring(
 
         task_id = tokenizer.tokens2ids(["<asr>"])[0]
         time_id = tokenizer.tokens2ids(["<notimestamp>"])[0]
-        prefix = torch.tensor([sos, lang_id, region_id, task_id, time_id], dtype=torch.long, device=device)
+        # Prefix tokens without sos (sos is added separately)
+        prefix_tokens = torch.tensor([lang_id, region_id, task_id, time_id], dtype=torch.long, device=device)
+        sos_tensor = torch.tensor([sos], dtype=torch.long, device=device)
 
         ys = [y[y != model.ignore_id] for y in hyps_pad]
-        ys = [torch.cat([prefix, y]) for y in ys]
+        prompt = infos.get("prompt", None)
+        if prompt is not None and len(prompt) > b:
+            prompt_tensor = prompt[b]
+            # Correct order: sos + prompt + prefix_tokens + hyp
+            ys = [torch.cat([sos_tensor, prompt_tensor, prefix_tokens, y]) for y in ys]
+            prefix_len = 1 + len(prompt_tensor) + 4
+        else:
+            ys = [torch.cat([sos_tensor, prefix_tokens, y]) for y in ys]
+            prefix_len = 5
         hyps_pad = pad_list(ys, eos)
-        hyps_lens = hyps_lens + 5
-        prefix_len = 5
+        hyps_lens = hyps_lens + prefix_len
 
         decoder_out, r_decoder_out = model.forward_attention_decoder(hyps_pad, hyps_lens, encoder_out, reverse_weight)
         # Only use decoder score for rescoring
