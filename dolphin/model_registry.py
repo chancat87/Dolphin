@@ -8,12 +8,12 @@ MODELS = {
         "model_id": "DataoceanAI/dolphin-small",
         "sha256": "4a0c6c636657121ec2a2b656e97e45b29a8b29c92fa3998006e02ab146d8ac51",
     },
-    "base.zh": {
-        "model_id": "DataoceanAI/dolphin-base-zh",
+    "base.fangyan": {
+        "model_id": "DataoceanAI/dolphin-base-fangyan",
         "sha256": "6c7a746c225f0f406053c9ebbdced7b79cfb91051d8060da3f1a26aa7913648b"
     },
-    "base.zh.streaming": {
-        "model_id": "DataoceanAI/dolphin-base-zh-streaming",
+    "base.fangyan.streaming": {
+        "model_id": "DataoceanAI/dolphin-base-fangyan-streaming",
         "sha256": "62e4c11fe1e0e42bd34e444172c5a05e792c4b5a03750f794fa3206fc0649cd7"
     },
     "small.fangyan": {
