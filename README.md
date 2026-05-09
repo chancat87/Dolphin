@@ -115,6 +115,7 @@ Thanks to the following excellent open-source works:
 
 - [Espnet](https://github.com/espnet/espnet)
 - [Wenet](https://github.com/wenet-e2e/wenet)
+- [FunASR](https://github.com/modelscope/FunASR)
 
 
 ## License
