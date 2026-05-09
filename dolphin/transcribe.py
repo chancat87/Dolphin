@@ -136,7 +136,7 @@ def convert_v1_state_dict(state_dict: Dict[str, Any]) -> Dict[str, Any]:
 
 def load_model(
     model_name: str,
-    model_dir: Union[Path, str],
+    model_dir: Union[Path, str] = None,
     device: Optional[Union[str, torch.device]] = None,
 ) -> ASRModel:
     """
@@ -150,6 +150,9 @@ def load_model(
     Returns:
         ASRModel instance
     """
+    if model_dir is None:
+        model_dir = os.path.expanduser(f"~/.cache/dolphin/{model_name}")
+        
     if device is None:
         device = detect_device()
         logger.info(f"auto detect device: {device}")
