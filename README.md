@@ -109,15 +109,15 @@ from dolphin import transcribe
 model_name = 'small.fangyan'
 model = dolphin.load_model(model_name, device="cuda")
 
-result = transcribe(model, 'hotword.wav')
+result = transcribe(model, 'audio.wav')
 print(result.text)
 
 # Specify language
-result = transcribe(model, 'hotword.wav', lang_sym="zh")
+result = transcribe(model, 'audio.wav', lang_sym="zh")
 print(result.text)
 
 # Specify language and region and encoder-biased hotwords
-result = transcribe(model, 'hotword.wav', lang_sym="zh", region_sym="CN", hotwords=['诺香丹青牌科研胶囊'], use_deep_biasing=True, use_two_stage_filter=True)
+result = transcribe(model, 'audio.wav', lang_sym="zh", region_sym="CN", hotwords=['诺香丹青牌科研胶囊'], use_deep_biasing=True, use_two_stage_filter=True)
 print(result.text)
 
 ## prompt-based hotwords
