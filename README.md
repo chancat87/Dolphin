@@ -9,6 +9,9 @@
 
 Dolphin is a multilingual, multitask ASR model developed through a collaboration between Dataocean AI and Tsinghua University. It supports 40 Eastern languages across East Asia, South Asia, Southeast Asia, and the Middle East, while also supporting 22 Chinese dialects. It is trained on over 210,000 hours of data, which includes both DataoceanAI's proprietary datasets and open-source datasets. The model can perform speech recognition, voice activity detection (VAD), segmentation, and language identification (LID).
 
+## 🔥 News
+- [2026-05-09] Dolphin-Fangyan small/base released, including base, base.streaming, small, small.prompt, small.streaming.
+
 ## Approach
 
 ![Mulitask data format](https://raw.githubusercontent.com/DataoceanAI/Dolphin/refs/heads/main/figures/multitask-data-format.png)
@@ -80,34 +83,61 @@ To run Dolphin on Ascend NPU, you need to install the corresponding `torch_npu` 
 ### Command-line usage
 
 ```shell
+# default model:small
 dolphin audio.wav
 
 # Download model and specify the model path
-dolphin audio.wav --model small --model_dir /data/models/dolphin/
+dolphin audio.wav --model small.fangyan --model_dir /data/models/dolphin/
 
 # Specify language and region
-dolphin audio.wav --model small --model_dir /data/models/dolphin/ --lang_sym "zh" --region_sym "CN"
+dolphin audio.wav --model small.fangyan --model_dir /data/models/dolphin/ --lang_sym "zh" --region_sym "CN"
 
-# padding speech to 30 seconds
-dolphin audio.wav --model small --model_dir /data/models/dolphin/ --lang_sym "zh" --region_sym "CN" --padding_speech true
+# Specify the hotwords file with Encoder-biased method
+dolphin audio.wav --model small.fangyan --model_dir /data/models/dolphin/ --hotword_list_path hotwords.txt --use_deep_biasing true
+
+# Using prompt-based model
+dolphin audio.wav --model small.fangyan.prompt --model_dir /data/models/dolphin/ --hotword_list_path hotwords.txt --use_prompt_hotword true --use_two_stage_filter true
+
 ```
 
 ### Python usage
 
 ```python
 import dolphin
+from dolphin import transcribe
 
-waveform = dolphin.load_audio("audio.wav")
-model = dolphin.load_model("small", "/data/models/dolphin", "cuda")
-result = model(waveform)
+model_name = 'small.fangyan'
+model = dolphin.load_model(model_name, f"/Users/hudu/.cache/dolphin/{model_name}", "cpu")
+
+result = transcribe(model, 'hotword.wav')
+print(result.text)
 
 # Specify language
-result = model(waveform, lang_sym="zh")
+result = transcribe(model, 'hotword.wav', lang_sym="zh")
+print(result.text)
 
-# Specify language and region
-result = model(waveform, lang_sym="zh", region_sym="CN")
+# Specify language and region and encoder-biased hotwords
+result = transcribe(model, 'hotword.wav', lang_sym="zh", region_sym="CN", hotwords=['诺香丹青牌科研胶囊'], use_deep_biasing=True, use_two_stage_filter=True)
+print(result.text)
+
+## prompt-based hotwords
+
+model_name = 'small.fangyan.prompt'
+model = dolphin.load_model(model_name, f"/data/models/dolphin/{model_name}", "cuda")
+
+result = transcribe(model, 'audio.wav', hotwords=['诺香丹青牌科研胶囊'], use_prompt_hotword=True, use_two_stage_filter=True, decoding_method='attention')
+
 print(result.text)
 ```
+
+## Acknowledgements
+
+Thanks to the following excellent open-source works:
+
+- [Espnet](https://github.com/espnet/espnet)
+- [Wenet](https://github.com/wenet-e2e/wenet)
+- [FunASR](https://github.com/modelscope/FunASR)
+
 
 ## License
 
