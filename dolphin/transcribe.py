@@ -358,11 +358,13 @@ def transcribe_long(
 
         lang_tokens = [f"<{lang_sym}>"] if lang_sym is not None else None
         region_tokens = [f"<{region_sym}>"] if region_sym is not None else None
+        need_timestamp = True if predict_time and model.model_configs.get("support_timestamp", False) else False
 
         decoding_infos = {
             "tokenizer": tokenizer,
             "langs": lang_tokens,
             "regions": region_tokens,
+            "need_timestamp": need_timestamp,
             "word_timestamp": word_timestamp
         }
 
@@ -619,6 +621,7 @@ def transcribe(
 
     lang_tokens = [f"<{lang_sym}>"] if lang_sym is not None else None
     region_tokens = [f"<{region_sym}>"] if region_sym is not None else None
+    need_timestamp = True if predict_time and model.model_configs.get("support_timestamp", False) else False
 
     tokenizer = init_tokenizer(model.model_configs)
     
@@ -626,6 +629,7 @@ def transcribe(
         "tokenizer": tokenizer,
         "langs": lang_tokens,
         "regions": region_tokens,
+        "need_timestamp": need_timestamp,
         "word_timestamp": word_timestamp
     }
 
