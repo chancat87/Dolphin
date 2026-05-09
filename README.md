@@ -107,7 +107,7 @@ import dolphin
 from dolphin import transcribe
 
 model_name = 'small.fangyan'
-model = dolphin.load_model(model_name, f"/Users/hudu/.cache/dolphin/{model_name}", "cpu")
+model = dolphin.load_model(model_name, device="cuda")
 
 result = transcribe(model, 'hotword.wav')
 print(result.text)
@@ -123,7 +123,7 @@ print(result.text)
 ## prompt-based hotwords
 
 model_name = 'small.fangyan.prompt'
-model = dolphin.load_model(model_name, f"/data/models/dolphin/{model_name}", "cuda")
+model = dolphin.load_model(model_name, device="cuda")
 
 result = transcribe(model, 'audio.wav', hotwords=['诺香丹青牌科研胶囊'], use_prompt_hotword=True, use_two_stage_filter=True, decoding_method='attention')
 
