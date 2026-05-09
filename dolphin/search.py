@@ -1,4 +1,5 @@
 import math
+import traceback
 from collections import defaultdict
 from typing import List, Tuple, Union, Dict
 
@@ -7,10 +8,63 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.nn.utils.rnn import pad_sequence
 
+try:
+    import torchaudio
+    TORCHAUDIO_AVAILABLE = True
+except ImportError:
+    TORCHAUDIO_AVAILABLE = False
+
 from dolphin.tokenizer import BaseTokenizer
 from dolphin.common import add_sos_eos, log_add, pad_list
 from dolphin.mask import (subsequent_mask, mask_finished_preds,
                           mask_finished_scores, make_pad_mask, mask_to_bias)
+
+
+def ctc_alignment_to_timestamp(ys_with_blank: List[int], subsampling: int, blank_id: int = 0) -> Tuple[List[float], List[float]]:
+    """Convert CTC alignment to start/end timestamps.
+
+    Args:
+        ys_with_blank: CTC alignment with blank tokens
+        subsampling: subsampling rate of the encoder
+        blank_id: blank token id
+
+    Returns:
+        Tuple of (start_times, end_times) in seconds
+    """
+    start_times: List[float] = []
+    end_times: List[float] = []
+    frame_shift = 10  # ms, hard code
+    T = len(ys_with_blank)
+    t = 0
+    ctc_durs = []
+    while t < T:
+        token = ys_with_blank[t]
+        t += 1
+        if token != blank_id:
+            start_t = t
+            timestamp = frame_shift * subsampling * t / 1000.0  # s
+            start_times.append(timestamp)
+            if len(start_times) == len(end_times) + 2:
+                end_times.append(start_times[-1])
+            # skip repeat token
+            while t < T and token == ys_with_blank[t]:
+                t += 1
+            assert t - start_t >= 0
+            ctc_durs.append((t - start_t + 1) * frame_shift * subsampling / 1000.0)
+    end_times.append((frame_shift * subsampling * T + 25) / 1000.0)
+    if len(start_times) == 0:
+        start_times.append(0.0)
+
+    # Refine end_times
+    assert len(ctc_durs) == len(end_times) and len(start_times) == len(end_times)
+    avg_dur = sum(e - s for s, e in zip(start_times, end_times)) / len(end_times)
+    new_end_times = []
+    for s, e, ctc_dur in zip(start_times, end_times, ctc_durs):
+        if e - s > 2 * avg_dur:
+            e = s + max(1.5 * avg_dur, ctc_dur)
+        new_end_times.append(round(e, 3))
+    end_times = new_end_times
+    return start_times, end_times
 
 
 def remove_duplicates_and_blank(hyp: List[int], blank_id: int = 0) -> List[int]:
@@ -32,20 +86,20 @@ class DecodeResult:
                  score: float = 0.0,
                  confidence: float = 0.0,
                  tokens_confidence: List[float] = None,
-                 times: List[int] = None,
+                 times: List[Dict[str, float]] = None,
                  nbest: List[List[int]] = None,
                  nbest_scores: List[float] = None,
-                 nbest_times: List[List[int]] = None):
+                 nbest_times: List[List[Dict[str, float]]] = None):
         """
         Args:
             tokens: decode token list
             score: the total decode score of this result
             confidence: the total confidence of this result, it's in 0~1
             tokens_confidence: confidence of each token
-            times: timestamp of each token, list of (start, end)
+            times: timestamp of each word, list of {"word": str, "start": float, "end": float}
             nbest: nbest result
             nbest_scores: score of each nbest
-            nbest_times:
+            nbest_times: timestamps for nbest results
         """
         self.tokens = tokens
         self.score = score
@@ -265,8 +319,12 @@ def attention_beam_search(
     running_size = batch_size * beam_size
 
     need_timestamp = infos.get("need_timestamp", False)
+    word_timestamp = infos.get("word_timestamp", False)
     assert "tokenizer" in infos, "Please specify tokenizer!"
     tokenizer: BaseTokenizer = infos["tokenizer"]
+
+    # Save encoder lengths before mask is converted to bias
+    encoder_lens = encoder_mask.squeeze(1).sum(1)
 
     if "langs" in infos:
         hyps = torch.ones([running_size, 1], dtype=torch.long, device=device).fill_(model.sos)  # (B*N, 1)
@@ -422,6 +480,12 @@ def attention_beam_search(
         # Filter out unk tokens used for padding
         hyp = hyp[hyp != unk_id]
         results.append(DecodeResult(hyp.tolist()))
+
+    # Compute token-level timestamps using CTC forced alignment
+    if word_timestamp and TORCHAUDIO_AVAILABLE:
+        results = model.get_token_timestamp_torchaudio(
+            encoder_out, encoder_lens, results, tokenizer)
+
     return results
 
 
@@ -444,7 +508,11 @@ def attention_rescoring(
     assert infos is not None, "must specify tokenizer via infos variable!"
     assert "tokenizer" in infos, "Please specify tokenizer!"
     tokenizer: BaseTokenizer = infos["tokenizer"]
+    word_timestamp = infos.get("word_timestamp", False)
 
+    # Save encoder lengths before mask is converted to bias
+    encoder_lens = encoder_mask.squeeze(1).sum(1)
+    
     results = []
     for b in range(batch_size):
         encoder_out = encoder_outs[b, :encoder_lens[b], :].unsqueeze(0)
@@ -537,9 +605,13 @@ def attention_rescoring(
             tokens.tolist(),
             best_score,
             confidence=confidences[best_index],
-            times=ctc_prefix_results[b].nbest_times[best_index],
             tokens_confidence=tokens_confidences[best_index]
         )
         results.append(decode_result)
-
+        
+    # Compute token-level timestamps using CTC forced alignment
+    if word_timestamp and TORCHAUDIO_AVAILABLE:
+        results = model.get_token_timestamp_torchaudio(
+            encoder_out, encoder_lens, results, tokenizer)
+        
     return results

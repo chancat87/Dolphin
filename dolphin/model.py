@@ -1,4 +1,5 @@
 import os
+import re
 import copy
 import math
 import logging
@@ -32,6 +33,7 @@ class TranscribeResult:
     text_nospecial: str
     language: str
     region: str
+    word_timestamps: List[Dict[str, float]] = None
 
 
 @dataclasses.dataclass
@@ -42,6 +44,7 @@ class TranscribeSegmentResult:
     region: str
     start: float
     end: float
+    word_timestamps: List[Dict[str, float]] = None
 
 
 
@@ -2941,6 +2944,192 @@ class ASRModel(torch.nn.Module):
     @device.setter
     def device(self, device: str):
         self._device = device
+
+    def get_token_timestamp_torchaudio(
+        self,
+        enc_outputs: torch.Tensor,
+        enc_lengths: torch.Tensor,
+        nbest_hyps: List["DecodeResult"],
+        tokenizer: "BaseTokenizer",
+        blank_id: int = 0,
+    ) -> List["DecodeResult"]:
+        """Get token-level timestamps using CTC forced alignment.
+
+        Args:
+            enc_outputs: encoder outputs, tensor of shape (B, T, D)
+            enc_lengths: encoder output lengths
+            nbest_hyps: list of DecodeResult with decoded tokens
+            tokenizer: tokenizer instance
+            blank_id: blank token id (default: 0)
+
+        Returns:
+            List of DecodeResult with timestamp field populated
+        """
+        try:
+            import torchaudio
+        except ImportError:
+            return nbest_hyps
+
+        ctc_logits = self.ctc.log_softmax(enc_outputs)
+
+        subsampling = self.encoder.embed.subsampling_rate
+
+        # Common punctuation marks to filter out
+        punctuation_tokens = set()
+        for p in '。，、；：？！""''.《》【】（）—…·～':
+            ids = tokenizer.tokens2ids([p])
+            if ids:
+                punctuation_tokens.add(ids[0])
+
+        for n in range(enc_outputs.size(0)):
+            try:
+                enc_len = int(enc_lengths[n])
+                n_ctc_logits = ctc_logits[n, :enc_len]
+                tokens = nbest_hyps[n].tokens
+
+                if len(tokens) == 0 or n_ctc_logits.size(0) == 0:
+                    nbest_hyps[n].times = None
+                    continue
+
+                # Check if tokenizer is BPE (for word merging)
+                is_bpe = hasattr(tokenizer, '_model') and tokenizer._model is not None
+
+                # Get prompt tokens to filter out
+                prompt_start_id = None
+                prompt_end_id = None
+                if '<PROMPT_START>' in tokenizer.symbol_table:
+                    prompt_start_id = tokenizer.symbol_table['<PROMPT_START>']
+                    prompt_end_id = tokenizer.symbol_table['<PROMPT_END>']
+
+                # Identify text tokens (non-special, non-punctuation)
+                # Filter out tags (tokens that look like <...>)
+                text_token_indices = []
+                text_tokens = []
+                text_token_texts = []
+                last_time_id = tokenizer.tokens2ids(["<30.00>"])[0]
+
+                in_prompt_region = False
+                for i, tid in enumerate(tokens):
+                    # Track prompt region
+                    if prompt_start_id is not None and tid == prompt_start_id:
+                        in_prompt_region = True
+                        continue
+                    if prompt_end_id is not None and tid == prompt_end_id:
+                        in_prompt_region = False
+                        continue
+                    # Skip tokens in prompt region
+                    if in_prompt_region:
+                        continue
+
+                    # Skip special tokens (token text starts with < and ends with >)
+                    token_text = tokenizer.ids2tokens([tid])[0] if isinstance(tid, int) else tid
+                    if isinstance(token_text, str) and token_text.startswith('<') and token_text.endswith('>'):
+                        continue
+                    # Skip tokens with id <= last_time_id (special tokens like <30.00>)
+                    if tid <= last_time_id:
+                        continue
+                    # Skip punctuation
+                    if tid in punctuation_tokens:
+                        continue
+                    text_token_indices.append(i)
+                    text_tokens.append(tid)
+                    text_token_texts.append(token_text)
+
+                if len(text_tokens) == 0:
+                    nbest_hyps[n].times = None
+                    continue
+
+                y = torch.tensor(text_tokens, dtype=torch.long, device=enc_outputs.device)
+
+                if y.numel() > n_ctc_logits.size(0):
+                    nbest_hyps[n].times = None
+                    continue
+
+                alignment, _ = torchaudio.functional.forced_align(
+                    n_ctc_logits.unsqueeze(0), y.unsqueeze(0), blank=blank_id)
+                alignment = alignment[0].cpu().tolist()
+
+                from dolphin.search import ctc_alignment_to_timestamp
+                start_times, end_times = ctc_alignment_to_timestamp(
+                    alignment, subsampling, blank_id=blank_id)
+
+                # Create word_timestamp list (merged if BPE)
+                word_timestamps = []
+
+                if is_bpe:
+                    # BPE: merge consecutive subword tokens into words
+                    current_word = ""
+                    current_start = None
+                    current_end = None
+                    ZH_JA_KO_UNICODE = '[\u4e00-\u9fa5\uac00-\ud7ff\u4E00-\u9FFF\u3040-\u309f\u30a0-\u30ff]'
+                    for idx, (text, start, end) in enumerate(zip(text_token_texts, start_times, end_times)):
+                        # Skip lone ▁ tokens - they don't participate in word merging
+                        if text == '▁':
+                            # If we have a current word with valid timestamps, save it
+                            if current_word and current_start is not None:
+                                word = current_word.lstrip('▁')
+                                if word:
+                                    word_timestamps.append({
+                                        "word": word,
+                                        "start": round(current_start, 3),
+                                        "end": round(current_end, 3)
+                                    })
+                            # Reset state - lone ▁ doesn't start a word
+                            current_word = ""
+                            current_start = None
+                            current_end = None
+                            continue
+
+                        # SentencePiece uses "▁" prefix for word starts
+                        if text.startswith('▁') or re.findall(ZH_JA_KO_UNICODE, text):
+                            # Save previous word if exists with valid timestamps
+                            if current_word and current_start is not None:
+                                # Remove the leading underscore for display
+                                word = current_word.lstrip('▁')
+                                if word:
+                                    word_timestamps.append({
+                                        "word": word,
+                                        "start": round(current_start, 3),
+                                        "end": round(current_end, 3)
+                                    })
+                            # Start new word
+                            current_word = text
+                            current_start = start
+                            current_end = end
+                        else:
+                            # Continue current word (subword continuation without ▁)
+                            # If current_start is None, this is the first subword of a new word
+                            if current_start is None:
+                                current_start = start
+                            current_word += text
+                            current_end = end
+
+                    # Don't forget the last word
+                    if current_word and current_start is not None:
+                        word = current_word.lstrip('▁')
+                        if word:
+                            word_timestamps.append({
+                                "word": word,
+                                "start": round(current_start, 3),
+                                "end": round(current_end, 3)
+                            })
+                else:
+                    # Char tokenizer: each token is already a word/char
+                    for text, start, end in zip(text_token_texts, start_times, end_times):
+                        word_timestamps.append({
+                            "word": text,
+                            "start": round(start, 3),
+                            "end": round(end, 3)
+                        })
+
+                nbest_hyps[n].times = word_timestamps
+
+            except Exception:
+                import traceback
+                traceback.print_exc()
+                nbest_hyps[n].times = None
+
+        return nbest_hyps
 
     @torch.jit.export
     def forward_encoder_chunk(
