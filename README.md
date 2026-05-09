@@ -114,7 +114,7 @@ print(result.text)
 Thanks to the following excellent open-source works:
 
 - [Espnet](https://github.com/espnet/espnet)
-- [Wenet](git@github.com:wenet-e2e/wenet.git)
+- [Wenet](https://github.com/wenet-e2e/wenet)
 
 
 ## License
