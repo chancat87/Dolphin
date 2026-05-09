@@ -190,7 +190,7 @@ def load_model(
 
         configs["tokenizer_conf"]["symbol_table_path"] = str(model_dir / "units.txt")
         if "bpe_path" in configs["tokenizer_conf"]:
-            configs["tokenizer_conf"]["bpe_path"] = str(model_dir / configs["tokenizer_conf"]["bpe_path"])
+            configs["tokenizer_conf"]["bpe_path"] = str(model_dir / 'bpe.model')
 
     model = init_speech_model(configs)
     state_dict = torch.load(model_dir / f"{model_name}.pt", map_location="cpu")
