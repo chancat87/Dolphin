@@ -109,6 +109,14 @@ result = model(waveform, lang_sym="zh", region_sym="CN")
 print(result.text)
 ```
 
+## Acknowledgements
+
+Thanks to the following excellent open-source works:
+
+- [Espnet](https://github.com/espnet/espnet)
+- [Wenet](git@github.com:wenet-e2e/wenet.git)
+
+
 ## License
 
 Dolphin's code and model weights are released under the [Apache 2.0 License](./LICENSE).
