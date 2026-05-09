@@ -66,6 +66,7 @@ def parser_args() -> Namespace:
     parser.add_argument("--lang_sym", type=str, default=None, help="language symbol (e.g. zh)")
     parser.add_argument("--region_sym", type=str, default=None, help="region symbol (e.g. CN)")
     parser.add_argument("--device", type=str, default=None, help="torch device (default: None)")
+    parser.add_argument("--predict_time", type=str2bool, default=True, help="whether predict timestamp (default: true)")
     parser.add_argument("--word_timestamp", type=str2bool, default=True, help="whether predict word timestamp (default: true)")
     parser.add_argument("--beam_size", type=int, default=10, help="number of beams in beam search (default: 10)")
     parser.add_argument("--decoding_method", type=str, default="attention_rescoring",
@@ -268,6 +269,7 @@ def transcribe_long(
     lang_sym: str = None,
     region_sym: str = None,
     predict_time: bool = True,
+    word_timestamp: bool =True,
     padding_speech: bool = False,
     decoding_method: str = "attention_rescoring",
     beam_size: int = 10,
@@ -286,7 +288,8 @@ def transcribe_long(
         audio: audio path
         lang_sym: language symbol (e.g. zh)
         region_sym: region symbol (e.g. CN)
-        predict_time: whether predict timestamp (default: true)
+        predict_time: whether predict timestamp (default: false)
+        word_timestamp: whether predict word timestamp (default: true)
         padding_speech: deprecated, whether padding speech to 30 seconds (default: false)
         decoding_method: decoding methods, supports: attention, attention_rescoring (default: attention_rescoring)
         hotwords: list of hotword strings (default: None)
@@ -581,6 +584,7 @@ def transcribe(
     audio: str,
     lang_sym: str = None,
     region_sym: str = None,
+    predict_time: bool = False,
     word_timestamp: bool =False,
     padding_speech: bool = False,
     decoding_method: str = "attention_rescoring",
@@ -600,7 +604,8 @@ def transcribe(
         audio: audio path
         lang_sym: language symbol (e.g. zh)
         region_sym: region symbol (e.g. CN)
-        word_timestamp: whether predict word timestamp (default: false)
+        predict_time: whether predict timestamp (default: true)
+        word_timestamp: whether predict word timestamp (default: true)
         padding_speech: deprecated, whether padding speech to 30 seconds (default: false)
         decoding_method: decoding methods, supports: attention, attention_rescoring (default: attention_rescoring)
         hotwords: list of hotword strings (default: None)
@@ -739,6 +744,7 @@ def cli():
         "audio": args.audio,
         "lang_sym": args.lang_sym,
         "region_sym": args.region_sym,
+        "predict_time": args.predict_time,
         "word_timestamp": args.word_timestamp,
         "padding_speech": args.padding_speech,
         "decoding_method": args.decoding_method,
