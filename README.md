@@ -10,7 +10,7 @@
 Dolphin is a multilingual, multitask ASR model developed through a collaboration between Dataocean AI and Tsinghua University. It supports 40 Eastern languages across East Asia, South Asia, Southeast Asia, and the Middle East, while also supporting 22 Chinese dialects. It is trained on over 210,000 hours of data, which includes both DataoceanAI's proprietary datasets and open-source datasets. The model can perform speech recognition, voice activity detection (VAD), segmentation, and language identification (LID).
 
 ## 🔥 News
-- [2026-05-09] Dolphin-Fangyan small/base released, including base, base.streaming, small, small.prompt, small.streaming.
+- [2026-05-09] Dolphin-CN-Dialect small/base released, including base, base.streaming, small, small.prompt, small.streaming.
 
 ## Approach
 
@@ -56,11 +56,11 @@ There are 4 models in Dolphin, and 2 of them are available now. See details in [
 | small  |   0.4 B    |      ✅       |
 | medium |   0.9 B    |            |
 | large  |   1.7B   |             |
-| base.fangyan | 0.1 B | ✅ |
-| base.fangyan.streaming | 0.1 B | ✅ |
-| small.fangyan | 0.4 B | ✅ |
-| small.fangyan.streaming | 0.4 B | ✅ |
-| small.fangyan.prompt | 0.4 B | ✅ |
+| base.cn | 0.1 B | ✅ |
+| base.cn.streaming | 0.1 B | ✅ |
+| small.cn | 0.4 B | ✅ |
+| small.cn.streaming | 0.4 B | ✅ |
+| small.cn.prompt | 0.4 B | ✅ |
 
 ### Languages
 
@@ -87,16 +87,16 @@ To run Dolphin on Ascend NPU, you need to install the corresponding `torch_npu` 
 dolphin audio.wav
 
 # Download model and specify the model path
-dolphin audio.wav --model small.fangyan --model_dir /data/models/dolphin/
+dolphin audio.wav --model small.cn
 
 # Specify language and region
-dolphin audio.wav --model small.fangyan --model_dir /data/models/dolphin/ --lang_sym "zh" --region_sym "CN"
+dolphin audio.wav --model small.cn --lang_sym "zh" --region_sym "CN"
 
 # Specify the hotwords file with Encoder-biased method
-dolphin audio.wav --model small.fangyan --model_dir /data/models/dolphin/ --hotword_list_path hotwords.txt --use_deep_biasing true
+dolphin audio.wav --model small.cn --hotword_list_path hotwords.txt --use_deep_biasing true
 
 # Using prompt-based model
-dolphin audio.wav --model small.fangyan.prompt --model_dir /data/models/dolphin/ --hotword_list_path hotwords.txt --use_prompt_hotword true --use_two_stage_filter true
+dolphin audio.wav --model small.cn.prompt --hotword_list_path hotwords.txt --use_prompt_hotword true --use_two_stage_filter true
 
 ```
 
@@ -106,7 +106,7 @@ dolphin audio.wav --model small.fangyan.prompt --model_dir /data/models/dolphin/
 import dolphin
 from dolphin import transcribe
 
-model_name = 'small.fangyan'
+model_name = 'small.cn'
 model = dolphin.load_model(model_name, device="cuda")
 
 result = transcribe(model, 'hotword.wav')
@@ -122,7 +122,7 @@ print(result.text)
 
 ## prompt-based hotwords
 
-model_name = 'small.fangyan.prompt'
+model_name = 'small.cn.prompt'
 model = dolphin.load_model(model_name, device="cuda")
 
 result = transcribe(model, 'audio.wav', hotwords=['诺香丹青牌科研胶囊'], use_prompt_hotword=True, use_two_stage_filter=True, decoding_method='attention')
@@ -137,7 +137,7 @@ Thanks to the following excellent open-source works:
 - [Espnet](https://github.com/espnet/espnet)
 - [Wenet](https://github.com/wenet-e2e/wenet)
 - [FunASR](https://github.com/modelscope/FunASR)
-
+- [FireRedASR2S](https://github.com/FireRedTeam/FireRedASR2S)
 
 ## License
 
