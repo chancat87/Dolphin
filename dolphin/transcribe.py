@@ -67,6 +67,7 @@ def parser_args() -> Namespace:
     parser.add_argument("--region_sym", type=str, default=None, help="region symbol (e.g. CN)")
     parser.add_argument("--device", type=str, default=None, help="torch device (default: None)")
     parser.add_argument("--predict_time", type=str2bool, default=True, help="whether predict timestamp (default: true)")
+    parser.add_argument("--word_timestamp", type=str2bool, default=True, help="whether predict word timestamp (default: true)")
     parser.add_argument("--beam_size", type=int, default=10, help="number of beams in beam search (default: 10)")
     parser.add_argument("--decoding_method", type=str, default="attention_rescoring",
                         help="decoding methods, supports: attention, attention_rescoring (default: attention_rescoring)")
@@ -268,6 +269,7 @@ def transcribe_long(
     lang_sym: str = None,
     region_sym: str = None,
     predict_time: bool = True,
+    word_timestamp: bool =True,
     padding_speech: bool = False,
     decoding_method: str = "attention_rescoring",
     beam_size: int = 10,
@@ -286,7 +288,8 @@ def transcribe_long(
         audio: audio path
         lang_sym: language symbol (e.g. zh)
         region_sym: region symbol (e.g. CN)
-        predict_time: whether predict timestamp (default: true)
+        predict_time: whether predict timestamp (default: false)
+        word_timestamp: whether predict word timestamp (default: true)
         padding_speech: deprecated, whether padding speech to 30 seconds (default: false)
         decoding_method: decoding methods, supports: attention, attention_rescoring (default: attention_rescoring)
         hotwords: list of hotword strings (default: None)
@@ -364,7 +367,8 @@ def transcribe_long(
             "tokenizer": tokenizer,
             "langs": lang_tokens,
             "regions": region_tokens,
-            "need_timestamp": need_timestamp
+            "need_timestamp": need_timestamp,
+            "word_timestamp": word_timestamp
         }
 
         if hotword_token_ids and hotword_encoder:
@@ -390,6 +394,7 @@ def transcribe_long(
             infos=decoding_infos
         )
         tokens = ret[decoding_method][0].tokens
+        word_ts = ret[decoding_method][0].times
 
         if use_prompt_hotword:
             hotwords_text, tokens = _filter_prompt_tokens(tokens, tokenizer)
@@ -403,11 +408,12 @@ def transcribe_long(
             text_nospecial=tokenizer.detokenize(nonspecial_tokens)[0],
             language=lang,
             region=region,
+            word_timestamps=word_ts,
         )
 
         st = seconds_to_hms(s/1000)
         et = seconds_to_hms(e/1000)
-        logger.info(f"segment: {st} - {et}, lang: {result.language}, region: {result.region}, text: {result.text_nospecial}")
+        logger.info(f"segment: {st} - {et}, lang: {result.language}, region: {result.region}, text: {result.text_nospecial} Timestamp: {result.word_timestamps}")
         result_json = dataclasses.asdict(result)
         result_json.update({
             "start": round(s/1000, 2),
@@ -579,6 +585,7 @@ def transcribe(
     lang_sym: str = None,
     region_sym: str = None,
     predict_time: bool = False,
+    word_timestamp: bool =False,
     padding_speech: bool = False,
     decoding_method: str = "attention_rescoring",
     beam_size: int = 10,
@@ -597,7 +604,8 @@ def transcribe(
         audio: audio path
         lang_sym: language symbol (e.g. zh)
         region_sym: region symbol (e.g. CN)
-        predict_time: whether predict timestamp (default: false)
+        predict_time: whether predict timestamp (default: true)
+        word_timestamp: whether predict word timestamp (default: true)
         padding_speech: deprecated, whether padding speech to 30 seconds (default: false)
         decoding_method: decoding methods, supports: attention, attention_rescoring (default: attention_rescoring)
         hotwords: list of hotword strings (default: None)
@@ -618,14 +626,16 @@ def transcribe(
 
     lang_tokens = [f"<{lang_sym}>"] if lang_sym is not None else None
     region_tokens = [f"<{region_sym}>"] if region_sym is not None else None
+    need_timestamp = True if predict_time and model.model_configs.get("support_timestamp", False) else False
 
     tokenizer = init_tokenizer(model.model_configs)
-    need_timestamp = True if predict_time and model.model_configs.get("support_timestamp", False) else False
+    
     decoding_infos = {
         "tokenizer": tokenizer,
         "langs": lang_tokens,
         "regions": region_tokens,
-        "need_timestamp": need_timestamp
+        "need_timestamp": need_timestamp,
+        "word_timestamp": word_timestamp
     }
 
     # Process hotwords if provided
@@ -687,6 +697,7 @@ def transcribe(
     )
 
     tokens = ret[decoding_method][0].tokens
+    word_ts = ret[decoding_method][0].times
     if use_prompt_hotword or "<PROMPT_START>" in tokenizer.symbol_table:
         hotwords_text, tokens = _filter_prompt_tokens(tokens, tokenizer)
         if hotwords_text:
@@ -700,9 +711,10 @@ def transcribe(
         text_nospecial=tokenizer.detokenize(nonspecial_tokens)[0],
         language=lang,
         region=region,
+        word_timestamps=word_ts,
     )
 
-    logger.info(f"decode result, language: {result.language}, region: {result.region}, text: {result.text_nospecial}")
+    logger.info(f"decode result, language: {result.language}, region: {result.region}, text: {result.text_nospecial}  Timestamp: {word_ts}")
     return result
 
 
@@ -733,6 +745,7 @@ def cli():
         "lang_sym": args.lang_sym,
         "region_sym": args.region_sym,
         "predict_time": args.predict_time,
+        "word_timestamp": args.word_timestamp,
         "padding_speech": args.padding_speech,
         "decoding_method": args.decoding_method,
         "beam_size": args.beam_size,

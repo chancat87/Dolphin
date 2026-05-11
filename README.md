@@ -10,7 +10,7 @@
 Dolphin is a multilingual, multitask ASR model developed through a collaboration between Dataocean AI and Tsinghua University. It supports 40 Eastern languages across East Asia, South Asia, Southeast Asia, and the Middle East, while also supporting 22 Chinese dialects. It is trained on over 210,000 hours of data, which includes both DataoceanAI's proprietary datasets and open-source datasets. The model can perform speech recognition, voice activity detection (VAD), segmentation, and language identification (LID).
 
 ## 🔥 News
-- [2026-05-09] Dolphin-CN-Dialect small/base released, including base, base.streaming, small, small.prompt, small.streaming.
+- [2026-05-09] Dolphin-CN-Dialect small/base released, including base, base.streaming, small, small.prompt, small.streaming; Support Word timestamps prediction for all Dolphin models.
 
 ## Approach
 
@@ -97,6 +97,9 @@ dolphin audio.wav --model small.cn --hotword_list_path hotwords.txt --use_deep_b
 
 # Using prompt-based model
 dolphin audio.wav --model small.cn.prompt --hotword_list_path hotwords.txt --use_prompt_hotword true --use_two_stage_filter true
+
+# predict word timestamp
+dolphin audio.wav --model small.cn.prompt --word_timestamp true
 
 ```
 
