@@ -29,11 +29,6 @@ import torch
 import torch.nn as nn
 import modelscope
 from modelscope.models.audio.funasr.model import GenericFunASR
-try:
-    import torch_npu
-    torch_npu_is_imported = True
-except:
-    torch_npu_is_imported = False
 
 from dolphin.audio import convert_audio
 # from dolphin.model import DolphinSpeech2Text, TranscribeResult, TranscribeSegmentResult
@@ -88,10 +83,6 @@ def parser_args() -> Namespace:
 def detect_device():
     if torch.cuda.is_available():
         device = "cuda"
-    elif torch.backends.mps.is_available() and torch.backends.mps.is_built():
-        device = "mps"
-    elif torch_npu_is_imported and torch_npu.npu.is_available():
-        device = "npu"
     else:
         device = "cpu"
 
