@@ -1,6 +1,7 @@
 # Dolphin
 
-[Paper](https://arxiv.org/abs/2503.20212)
+[Dolphin](https://arxiv.org/abs/2503.20212)
+[Dolphin-CN-Dialect](https://arxiv.org/abs/2605.08961)
 [Github](https://github.com/DataoceanAI/Dolphin)
 [Huggingface](https://huggingface.co/DataoceanAI)
 [Modelscope](https://www.modelscope.cn/organization/DataoceanAI)
@@ -48,19 +49,19 @@ pip install git+https://github.com/SpeechOceanTech/Dolphin.git
 
 ### Models
 
-There are 4 models in Dolphin, and 2 of them are available now. See details in [paper](https://arxiv.org/abs/2503.20212).
+There are 8 models in Dolphin, and 6 of them are available now. See details in [Dolphin](https://arxiv.org/abs/2503.20212) and [Dolphin-CN-Dialect](https://arxiv.org/abs/2605.08961).
 
 |  Model  | Parameters |Publicly Available |
 |:------:|:----------:|:------------------:|
-|  base  |    0.1 B    |      ✅        |
-| small  |   0.4 B    |      ✅       |
+|  [base](https://modelscope.cn/models/DataoceanAI/dolphin-base)  |    0.1 B    |      ✅        |
+| [small](https://modelscope.cn/models/DataoceanAI/dolphin-small)  |   0.4 B    |      ✅       |
 | medium |   0.9 B    |            |
 | large  |   1.7B   |             |
-| base.cn | 0.1 B | ✅ |
-| base.cn.streaming | 0.1 B | ✅ |
-| small.cn | 0.4 B | ✅ |
-| small.cn.streaming | 0.4 B | ✅ |
-| small.cn.prompt | 0.4 B | ✅ |
+| [base.cn](https://modelscope.cn/models/DataoceanAI/dolphin-cn-dialect-base) | 0.1 B | ✅ |
+| [base.cn.streaming](https://modelscope.cn/models/DataoceanAI/dolphin-cn-dialect-small-prompt) | 0.1 B | ✅ |
+| [small.cn](https://modelscope.cn/models/DataoceanAI/dolphi-cn-dialect-small) | 0.4 B | ✅ |
+| [small.cn.streaming](https://modelscope.cn/models/DataoceanAI/dolphin-cn-dialect-small-streaming) | 0.4 B | ✅ |
+| [small.cn.prompt](https://modelscope.cn/models/DataoceanAI/dolphin-cn-dialect-small-prompt) | 0.4 B | ✅ |
 
 ### Languages
 
